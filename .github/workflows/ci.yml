@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  ci:
+    name: CI
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            floors/contracts/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('floors/contracts/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Setup Rust (from rust-toolchain.toml)
+        working-directory: floors
+        run: rustup show  # reads rust-toolchain.toml automatically
+
+      - name: Setup Node 26
+        uses: actions/setup-node@v4
+        with:
+          node-version: "26"
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: "12.18.0"
+
+      - name: Cache pnpm store
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/share/pnpm/store
+          key: ${{ runner.os }}-pnpm-${{ hashFiles('floors/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-
+
+      - name: Install Node dependencies
+        working-directory: floors
+        run: pnpm install --frozen-lockfile
+
+      - name: cargo fmt check
+        working-directory: floors/contracts
+        run: cargo fmt --check
+
+      - name: cargo clippy
+        working-directory: floors/contracts
+        run: cargo clippy -- -D warnings -W clippy::pedantic
+
+      - name: cargo test
+        working-directory: floors/contracts
+        run: cargo test
+
+      - name: pnpm lint
+        working-directory: floors
+        run: pnpm lint
+
+      - name: pnpm typecheck
+        working-directory: floors
+        run: pnpm typecheck
+
+      - name: pnpm test
+        working-directory: floors
+        run: pnpm test

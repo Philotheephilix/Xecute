@@ -5,8 +5,8 @@ export default defineConfig({
   timeout: 30_000,
   retries: 1,
   use: {
-    // Extension testing requires headed mode
-    headless: false,
+    // Use headless mode in CI; headed locally for easier debugging
+    headless: !!process.env['CI'],
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',
   },

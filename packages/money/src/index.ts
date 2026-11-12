@@ -102,7 +102,7 @@ export class Amount {
     const abs = negative ? trimmed.slice(1) : trimmed;
     const parts = abs.split('.');
     if (parts.length > 2) throw new SyntaxError(`Invalid decimal string: "${value}"`);
-    const intPart = parts[0] ?? '';
+    const intPart = parts[0] ?? /* c8 ignore next */ '';
     const fracPart = parts[1] ?? '';
     if (!/^\d*$/.test(intPart) || !/^\d*$/.test(fracPart)) {
       throw new SyntaxError(`Invalid decimal string: "${value}"`);

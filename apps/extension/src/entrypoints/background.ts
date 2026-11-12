@@ -7,15 +7,12 @@
 
 import { defineBackground } from 'wxt/utils/define-background';
 import { browser } from 'wxt/browser';
+import { z } from 'zod';
+import { MessageSchema } from '../content/messages.js';
+
+const API_URL = 'http://localhost:3001';
 
 export default defineBackground(() => {
-  // ── Imports inside main to avoid WXT module-level evaluation ──────────────
-  // These are lazily-evaluated only at extension runtime, not build time.
-
-  // Re-use the message schema from the shared module
-  // (dynamic import avoids module-level Zod evaluation issue)
-  const { z } = require('zod') as typeof import('zod');
-  const { MessageSchema } = require('../content/messages.js') as typeof import('../content/messages.js');
 
   // ── Registry types ──────────────────────────────────────────────────────
   const TokenSchema = z.object({
@@ -91,9 +88,68 @@ export default defineBackground(() => {
     });
   }
 
+  // ── API call ──────────────────────────────────────────────────────────────
+  interface BuyApiResponse {
+    request_id: string;
+    tx_hash: string;
+    status: string;
+  }
+
+  async function postBuy(
+    ticker: string,
+    amount: string,
+    signature: string,
+    credentialId: string,
+    floorProtection: boolean,
+    quoteId: string,
+    idempotencyKey: string,
+  ): Promise<BuyApiResponse> {
+    const amountUsdc = Math.round(parseFloat(amount) * 1_000_000).toString();
+
+    const signedIntent = {
+      ticker,
+      amount_usdc: amountUsdc,
+      floor_protection: floorProtection,
+      signature,
+      credential_id: credentialId,
+    };
+
+    const res = await fetch(`${API_URL}/v1/buy`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': idempotencyKey,
+      },
+      body: JSON.stringify({
+        signed_intent: signedIntent,
+        quote_id: quoteId,
+      }),
+    });
+
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      throw new Error(`API /v1/buy returned ${res.status.toString()}: ${body}`);
+    }
+
+    return res.json() as Promise<BuyApiResponse>;
+  }
+
+  // ── Extended SHEET_SIGNED schema (includes extra fields from sheet) ───────
+  const SheetSignedExtendedSchema = z.object({
+    type: z.literal('SHEET_SIGNED'),
+    ticker: z.string(),
+    amount: z.string(),
+    signature: z.string(),
+    publicKey: z.string(),
+    credentialId: z.string(),
+    floorProtection: z.boolean(),
+    quoteId: z.string(),
+  });
+
   // ── Message handler ──────────────────────────────────────────────────────
   type MessageResponse =
     | { status: 'ok' }
+    | { status: 'ok'; request_id: string; tx_hash: string }
     | { registry: Registry }
     | { error: string };
 
@@ -139,13 +195,35 @@ export default defineBackground(() => {
         }
 
         case 'SHEET_SIGNED': {
-          console.info('[floors] Sheet signed:', {
-            ticker: message.ticker,
-            publicKey: message.publicKey,
-            signatureLength: message.signature.length,
-          });
-          sendResponse({ status: 'ok' });
-          return false;
+          // Parse the extended message (quoteId, amount, credentialId, floorProtection)
+          const extended = SheetSignedExtendedSchema.safeParse(rawMessage);
+          if (!extended.success) {
+            console.error('[floors] SHEET_SIGNED missing required fields:', extended.error);
+            sendResponse({ error: 'SHEET_SIGNED missing required fields' });
+            return false;
+          }
+
+          const { ticker, amount, signature, credentialId, floorProtection, quoteId } = extended.data;
+          const idempotencyKey = crypto.randomUUID();
+
+          console.info('[floors] Posting buy to API:', { ticker, quoteId });
+
+          postBuy(ticker, amount, signature, credentialId, floorProtection, quoteId, idempotencyKey)
+            .then((apiResponse) => {
+              console.info('[floors] Buy submitted:', apiResponse);
+              sendResponse({
+                status: 'ok',
+                request_id: apiResponse.request_id,
+                tx_hash: apiResponse.tx_hash,
+              });
+            })
+            .catch((err: unknown) => {
+              const msg = err instanceof Error ? err.message : String(err);
+              console.error('[floors] Buy API error:', msg);
+              sendResponse({ error: msg });
+            });
+
+          return true;
         }
 
         default: {

@@ -71,9 +71,14 @@ function handleMutations(mutations: MutationRecord[]): void {
   }
 }
 
+// MAIN world content script: defines the custom element and injects chips.
+// chrome.runtime is NOT available in MAIN world — use window.postMessage to
+// communicate with the isolated-world bridge (content-bridge.ts).
 export default defineContentScript({
-  matches: ['https://x.com/*', 'https://twitter.com/*'],
+  // http://localhost:* is included for E2E smoke tests (fixture file server).
+  matches: ['https://x.com/*', 'https://twitter.com/*', 'http://localhost/*'],
   runAt: 'document_idle',
+  world: 'MAIN',
   main() {
     defineFloorsBuyChip();
     scanAndInject();

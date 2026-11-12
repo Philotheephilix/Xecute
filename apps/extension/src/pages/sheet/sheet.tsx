@@ -585,26 +585,46 @@ function App() {
     setState((s) => ({ ...s, signing: true }));
 
     try {
-      // Build challenge from intent (ticker + amount + timestamp)
+      // Build a real JSON intent payload as challenge bytes (SHA-256'd)
+      const intentPayload = JSON.stringify({
+        ticker: state.ticker,
+        amount_usdc: Math.round(amount * 1_000_000).toString(), // 6-decimal USDC
+        floor_protection: state.floorProtection,
+      });
       const encoder = new TextEncoder();
-      const challengeText = `floors:buy:${state.ticker}:${state.amount}:${Date.now()}`;
-      const challenge = encoder.encode(challengeText);
+      const intentBytes = encoder.encode(intentPayload);
+      const hashBuffer = await crypto.subtle.digest('SHA-256', intentBytes);
+      const challenge = new Uint8Array(hashBuffer);
 
       const assertion = await signWithPasskey(challenge);
 
-      // Notify service worker
+      // Encode signature and credentialId as hex strings
       const sigHex = Array.from(assertion.signature)
         .map((b) => b.toString(16).padStart(2, '0'))
         .join('');
 
-      const credIdHex = btoa(assertion.credentialId);
+      // credentialId is already a Base64URL string from the webauthn lib
+      const credIdHex = assertion.credentialId;
 
-      await chrome.runtime.sendMessage({
+      const quoteId = Array.from(challenge)
+        .map((b) => b.toString(16).padStart(2, '0'))
+        .join('');
+
+      // Notify service worker — it will POST to the API
+      const response = await chrome.runtime.sendMessage({
         type: 'SHEET_SIGNED',
         ticker: state.ticker,
+        amount: state.amount,
         signature: sigHex,
         publicKey: credIdHex,
+        credentialId: credIdHex,
+        floorProtection: state.floorProtection,
+        quoteId,
       });
+
+      if (response && typeof response === 'object' && 'error' in response) {
+        throw new Error(String((response as { error: string }).error));
+      }
 
       setState((s) => ({
         ...s,
@@ -614,7 +634,7 @@ function App() {
           ticker: s.ticker,
           amount: s.amount,
           floorProtection: s.floorProtection,
-          credentialId: assertion.credentialId,
+          credentialId: credIdHex,
         },
       }));
     } catch (err) {

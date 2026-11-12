@@ -87,16 +87,15 @@ export class FloorsBuyChip extends HTMLElement {
     e.stopPropagation();
     e.preventDefault();
 
-    const message = {
-      type: 'OPEN_SHEET' as const,
+    // Dispatch a window message that the isolated-world bridge script will forward
+    // to chrome.runtime. We use window.postMessage because MAIN world content
+    // scripts cannot call chrome.runtime directly.
+    window.postMessage({
+      __floors__: true,
+      type: 'OPEN_SHEET',
       ticker: this.ticker,
       ...(this.postId !== undefined ? { postId: this.postId } : {}),
-    };
-
-    // Send message to service worker
-    chrome.runtime.sendMessage(message).catch((err: unknown) => {
-      console.warn('[floors] Failed to send OPEN_SHEET message:', err);
-    });
+    }, '*');
   };
 }
 
