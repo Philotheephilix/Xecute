@@ -5,20 +5,27 @@ members = [
     "floors-types",
     "mocks/mock-ft",
     "mocks/mock-pyth",
+    "tests",
 ]
 
 [workspace.package]
-version = "0.0.1"
+version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 
 [workspace.dependencies]
-# shared deps go here once needed
+near-sdk = "5.11.0"
+serde = { version = "1.0.219", features = ["derive"] }
+serde_json = "1.0.140"
+schemars = "0.8.22"
 
 [profile.release]
-opt-level = 3
-lto = true
 codegen-units = 1
+opt-level = "z"
+lto = true
+debug = false
+panic = "abort"
+overflow-checks = true
 
 [profile.dev]
 opt-level = 0

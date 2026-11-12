@@ -13,14 +13,17 @@
   },
   "scripts": {
     "build": "tsc --build",
-    "test": "echo \"no tests yet\"",
+    "test": "vitest run --coverage",
     "lint": "eslint src",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@floors/types": "workspace:*"
+    "zod": "3.25.67"
   },
   "devDependencies": {
-    "typescript": "5.7.3"
+    "typescript": "5.7.3",
+    "fast-check": "4.1.1",
+    "vitest": "3.2.4",
+    "@vitest/coverage-v8": "3.2.4"
   }
 }
