@@ -9,7 +9,12 @@ const BuyBodySchema = z.object({
 
 const IdempotencyKeyHeader = z.string().uuid();
 
-export function registerBuyRoutes(app: FastifyInstance): void {
+const RelayResponseSchema = z.object({
+  tx_hash: z.string(),
+  status: z.string(),
+});
+
+export function registerBuyRoutes(app: FastifyInstance, relayerUrl: string): void {
   app.post('/v1/buy', async (request: FastifyRequest, reply: FastifyReply) => {
     // Validate Idempotency-Key
     const idempotencyKeyRaw = request.headers['idempotency-key'];
@@ -43,16 +48,61 @@ export function registerBuyRoutes(app: FastifyInstance): void {
       );
     }
 
-    const { quote_id } = bodyResult.data;
+    const { signed_intent, quote_id } = bodyResult.data;
 
     // Generate request_id
     const request_id = crypto.randomUUID();
 
-    // Stub: relay to relayer service in S5
-    request.log.info({ quote_id, request_id }, 'buy_intent_received');
+    request.log.info({ quote_id, request_id }, 'buy_intent_received — forwarding to relayer');
+
+    // Forward to relayer service
+    const relayPayload = {
+      account_id: (signed_intent['credential_id'] as string | undefined) ?? 'alice.test.near',
+      actions: [signed_intent],
+      idempotency_key: ikResult.data,
+    };
+
+    let relayRes: Response;
+    try {
+      relayRes = await fetch(`${relayerUrl}/v1/relay`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(relayPayload),
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      request.log.error({ err, event: 'relay_fetch_error' }, 'Failed to reach relayer');
+      throw new FloorApiError('RELAYER_ERROR', `Relayer unreachable: ${msg}`, true, 502);
+    }
+
+    if (!relayRes.ok) {
+      const body = await relayRes.text().catch(() => '');
+      request.log.error({ status: relayRes.status, body, event: 'relay_error' }, 'Relayer returned error');
+      throw new FloorApiError(
+        'RELAYER_ERROR',
+        `Relayer returned ${relayRes.status.toString()}`,
+        false,
+        502,
+      );
+    }
+
+    const relayBody: unknown = await relayRes.json();
+    const relayParsed = RelayResponseSchema.safeParse(relayBody);
+    if (!relayParsed.success) {
+      request.log.error({ relayBody, event: 'relay_bad_response' }, 'Relayer response shape unexpected');
+      throw new FloorApiError('RELAYER_ERROR', 'Relayer response malformed', false, 502);
+    }
+
+    request.log.info(
+      { quote_id, request_id, tx_hash: relayParsed.data.tx_hash, event: 'buy_relayed' },
+      'Buy relayed successfully',
+    );
 
     return reply.status(202).send({
       request_id,
+      tx_hash: relayParsed.data.tx_hash,
       status: 'pending',
     });
   });

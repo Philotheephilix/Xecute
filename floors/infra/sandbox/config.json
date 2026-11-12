@@ -1,0 +1,85 @@
+{
+  "genesis_file": "genesis.json",
+  "genesis_records_file": null,
+  "validator_key_file": "validator_key.json",
+  "node_key_file": "node_key.json",
+  "rpc": {
+    "addr": "0.0.0.0:3030",
+    "cors_allowed_origins": ["*"],
+    "enable_debug_rpc": true
+  },
+  "network": {
+    "addr": "0.0.0.0:24567",
+    "public_addrs": [],
+    "allow_private_ip_in_public_addrs": true,
+    "blacklist": [],
+    "skip_sync_wait": true,
+    "ban_window": "1s",
+    "max_num_peers": 40,
+    "minimum_outbound_peers": 5,
+    "ideal_connections_lo": 30,
+    "ideal_connections_hi": 35,
+    "safe_set_size": 20,
+    "archival_peer_connections_lower_bound": 10,
+    "handshake_timeout": "20s",
+    "reconnect_delay": "60s",
+    "bootstrap_peers": []
+  },
+  "consensus": {
+    "min_block_production_delay": {
+      "secs": 0,
+      "nanos": 100000000
+    },
+    "max_block_production_delay": {
+      "secs": 0,
+      "nanos": 600000000
+    },
+    "max_block_wait_delay": {
+      "secs": 0,
+      "nanos": 600000000
+    },
+    "skip_timeout": {
+      "secs": 2,
+      "nanos": 0
+    },
+    "produce_empty_blocks": true,
+    "block_fetch_horizon": 50,
+    "state_sync_horizon": 5,
+    "block_header_fetch_horizon": 50,
+    "catchup_step_period": {
+      "secs": 0,
+      "nanos": 100000000
+    },
+    "doomslug_step_period": {
+      "secs": 0,
+      "nanos": 100000000
+    },
+    "sync_step_period": {
+      "secs": 0,
+      "nanos": 10000000
+    }
+  },
+  "log_summary_style": "auto",
+  "log_summary_period": {
+    "secs": 10,
+    "nanos": 0
+  },
+  "produce_chunk_add_transactions_time_limit": {
+    "secs": 0,
+    "nanos": 200000000
+  },
+  "gc": {
+    "gc_blocks_limit": 2,
+    "gc_fork_clean_step": 100,
+    "gc_num_epochs_to_keep": 5,
+    "gc_step_period": {
+      "secs": 1,
+      "nanos": 0
+    }
+  },
+  "tracked_shards": [0],
+  "archive": false,
+  "store": {
+    "path": "data"
+  }
+}

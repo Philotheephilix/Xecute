@@ -1,0 +1,77 @@
+{
+  "protocol_version": 57,
+  "genesis_time": "2023-01-01T00:00:00.000000000Z",
+  "chain_id": "localnet",
+  "genesis_height": 0,
+  "num_block_producer_seats": 50,
+  "num_block_producer_seats_per_shard": [50],
+  "avg_hidden_validator_seats_per_shard": [0],
+  "dynamic_resharding": false,
+  "protocol_upgrade_stake_threshold": [4, 5],
+  "epoch_length": 500,
+  "gas_limit": 1000000000000000,
+  "min_gas_price": "100000000",
+  "max_gas_price": "10000000000000000000000",
+  "block_producer_kickout_threshold": 90,
+  "chunk_producer_kickout_threshold": 90,
+  "online_min_threshold": [90, 100],
+  "online_max_threshold": [99, 100],
+  "gas_price_adjustment_rate": [1, 100],
+  "validators": [
+    {
+      "account_id": "test.near",
+      "public_key": "ed25519:He7QeRuwizNEhBioYG3D4wSG4WPZ5wnb7EMhEsT4wGBW",
+      "amount": "1000000000000000000000000000000"
+    }
+  ],
+  "transaction_validity_period": 100,
+  "protocol_reward_rate": [1, 10],
+  "max_inflation_rate": [1, 20],
+  "total_supply": "1000000000000000000000000000000000",
+  "num_blocks_per_year": 31536000,
+  "protocol_treasury_account": "test.near",
+  "fishermen_threshold": "340282366920938463463374607431768211455",
+  "minimum_stake_divisor": 10,
+  "shard_layout": {
+    "V0": {
+      "num_shards": 1,
+      "version": 0
+    }
+  },
+  "records": [
+    {
+      "Account": {
+        "account_id": "test.near",
+        "account": {
+          "amount": "1000000000000000000000000000000",
+          "locked": "1000000000000000000000000000000",
+          "code_hash": "11111111111111111111111111111111",
+          "storage_usage": 182,
+          "version": "V1"
+        }
+      }
+    },
+    {
+      "AccessKey": {
+        "account_id": "test.near",
+        "public_key": "ed25519:He7QeRuwizNEhBioYG3D4wSG4WPZ5wnb7EMhEsT4wGBW",
+        "access_key": {
+          "nonce": 0,
+          "permission": "FullAccess"
+        }
+      }
+    },
+    {
+      "Account": {
+        "account_id": "near",
+        "account": {
+          "amount": "1000000000000000000000000000000",
+          "locked": "0",
+          "code_hash": "11111111111111111111111111111111",
+          "storage_usage": 182,
+          "version": "V1"
+        }
+      }
+    }
+  ]
+}

@@ -9,8 +9,11 @@ export const OpenSheetMessageSchema = z.object({
 export const SheetSignedMessageSchema = z.object({
   type: z.literal('SHEET_SIGNED'),
   ticker: z.string(),
+  amount: z.string(),
   signature: z.string(),
   publicKey: z.string(),
+  credentialId: z.string(),
+  floorProtection: z.boolean(),
 });
 
 export const GetRegistryMessageSchema = z.object({

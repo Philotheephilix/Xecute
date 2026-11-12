@@ -6,6 +6,7 @@
   "main": "./dist/index.js",
   "scripts": {
     "build": "tsc --build",
+    "dev": "node --env-file=.env.local dist/index.js",
     "test": "echo \"no tests yet\"",
     "lint": "eslint src",
     "typecheck": "tsc --noEmit",
@@ -15,7 +16,9 @@
     "@floors/shared-server": "workspace:*",
     "@floors/types": "workspace:*",
     "fastify": "5.3.3",
+    "near-api-js": "5.0.1",
     "pino": "9.6.0",
+    "postgres": "3.4.5",
     "zod": "3.25.67"
   },
   "devDependencies": {

@@ -99,12 +99,74 @@ async function openSheet(ticker: string, postId?: string): Promise<void> {
   });
 }
 
+// ── API buy call ──────────────────────────────────────────────────────────────
+
+const API_URL = 'http://localhost:3001';
+
+interface BuyApiResponse {
+  request_id: string;
+  tx_hash: string;
+  status: string;
+}
+
+async function postBuy(
+  ticker: string,
+  amount: string,
+  signature: string,
+  credentialId: string,
+  floorProtection: boolean,
+  quoteId: string,
+  idempotencyKey: string,
+): Promise<BuyApiResponse> {
+  const amountUsdc = Math.round(parseFloat(amount) * 1_000_000).toString();
+
+  const signedIntent = {
+    ticker,
+    amount_usdc: amountUsdc,
+    floor_protection: floorProtection,
+    signature,
+    credential_id: credentialId,
+  };
+
+  const res = await fetch(`${API_URL}/v1/buy`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Idempotency-Key': idempotencyKey,
+    },
+    body: JSON.stringify({
+      signed_intent: signedIntent,
+      quote_id: quoteId,
+    }),
+  });
+
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(`API /v1/buy returned ${res.status.toString()}: ${body}`);
+  }
+
+  return res.json() as Promise<BuyApiResponse>;
+}
+
 // ── Message handler ───────────────────────────────────────────────────────────
 
 type MessageResponse =
   | { status: 'ok' }
+  | { status: 'ok'; request_id: string; tx_hash: string }
   | { registry: Registry }
   | { error: string };
+
+// Extend the SHEET_SIGNED message to include extra fields needed by background
+const SheetSignedExtendedSchema = z.object({
+  type: z.literal('SHEET_SIGNED'),
+  ticker: z.string(),
+  amount: z.string(),
+  signature: z.string(),
+  publicKey: z.string(),
+  credentialId: z.string(),
+  floorProtection: z.boolean(),
+  quoteId: z.string(),
+});
 
 chrome.runtime.onMessage.addListener(
   (
@@ -149,14 +211,37 @@ chrome.runtime.onMessage.addListener(
       }
 
       case 'SHEET_SIGNED': {
-        // S4: log only; S6 will relay to order service
-        console.info('[floors] Sheet signed:', {
-          ticker: message.ticker,
-          publicKey: message.publicKey,
-          signatureLength: message.signature.length,
-        });
-        sendResponse({ status: 'ok' });
-        return false;
+        // Parse extended fields from the raw message (quoteId, amount, credentialId, floorProtection)
+        const extended = SheetSignedExtendedSchema.safeParse(rawMessage);
+        if (!extended.success) {
+          sendResponse({ error: 'SHEET_SIGNED missing required fields' });
+          return false;
+        }
+
+        const { ticker, amount, signature, credentialId, floorProtection, quoteId } = extended.data;
+
+        // Generate idempotency key for this buy
+        const idempotencyKey = crypto.randomUUID();
+
+        console.info('[floors] Posting buy to API:', { ticker, quoteId });
+
+        postBuy(ticker, amount, signature, credentialId, floorProtection, quoteId, idempotencyKey)
+          .then((apiResponse) => {
+            console.info('[floors] Buy submitted:', apiResponse);
+            sendResponse({
+              status: 'ok',
+              request_id: apiResponse.request_id,
+              tx_hash: apiResponse.tx_hash,
+            });
+          })
+          .catch((err: unknown) => {
+            const msg = err instanceof Error ? err.message : String(err);
+            console.error('[floors] Buy API error:', msg);
+            sendResponse({ error: msg });
+          });
+
+        // Return true to indicate async response
+        return true;
       }
 
       default: {

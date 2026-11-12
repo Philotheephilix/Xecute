@@ -10,7 +10,8 @@
     "build": "turbo run build",
     "test": "turbo run test",
     "lint": "turbo run lint",
-    "typecheck": "turbo run typecheck"
+    "typecheck": "turbo run typecheck",
+    "setup-sandbox": "tsx scripts/setup-sandbox.ts"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
@@ -28,6 +29,8 @@
     "@typescript-eslint/eslint-plugin": "8.20.0",
     "@typescript-eslint/parser": "8.20.0",
     "eslint-config-prettier": "10.0.1",
-    "prettier": "3.4.2"
+    "prettier": "3.4.2",
+    "tsx": "4.19.2",
+    "near-api-js": "5.0.1"
   }
 }

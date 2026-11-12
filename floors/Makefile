@@ -1,4 +1,4 @@
-.PHONY: test test-contracts lint typecheck build stack stack-services e2e
+.PHONY: test test-contracts lint typecheck build stack stack-down stack-services e2e
 
 ## Run all tests (contracts + TS packages)
 test: test-contracts
@@ -20,14 +20,24 @@ typecheck:
 build:
 	pnpm --dir . build
 
-## Start the full local stack (docker compose)
+## Start the full local stack (docker compose): postgres + near-sandbox + mock-solver
 stack:
-	docker compose -f infra/docker-compose.yml up -d
+	docker compose -f docker-compose.yml up -d
 
-## Start only the backend services
+## Stop the full local stack
+stack-down:
+	docker compose -f docker-compose.yml down
+
+## Start only postgres, then launch all 5 Node services in background
 stack-services:
-	docker compose -f infra/docker-compose.yml up -d api relayer risk registry indexer
+	docker compose -f docker-compose.yml up -d postgres
+	pnpm --filter "@floors/api" dev &
+	pnpm --filter "@floors/relayer" dev &
+	pnpm --filter "@floors/risk" dev &
+	pnpm --filter "@floors/registry" dev &
+	pnpm --filter "@floors/indexer" dev &
 
-## Run end-to-end tests
+## Run end-to-end tests (build extension first, then run playwright headless if CI=true)
 e2e:
-	pnpm --dir . exec playwright test
+	pnpm --filter "@floors/extension" build
+	PW_DISABLE_TS_ESM=1 CI=true pnpm --filter "@floors/extension" exec playwright test
