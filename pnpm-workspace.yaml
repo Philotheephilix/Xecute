@@ -4,4 +4,15 @@ packages:
   - "apps/*"
 
 allowBuilds:
+  '@tailwindcss/oxide': true
   esbuild: true
+  protobufjs: true
+  secp256k1: true
+  spawn-sync: true
+
+onlyBuiltDependencies:
+  - "@tailwindcss/oxide"
+  - esbuild
+  - protobufjs
+  - secp256k1
+  - spawn-sync

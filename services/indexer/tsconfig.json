@@ -1,0 +1,15 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    "moduleResolution": "bundler",
+    "paths": {
+      "@floors/shared-server": ["../../packages/shared-server/src/index.ts"]
+    }
+  },
+  "include": ["src"],
+  "references": [
+    { "path": "../../packages/shared-server" }
+  ]
+}
