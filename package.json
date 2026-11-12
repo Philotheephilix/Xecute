@@ -12,6 +12,15 @@
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck"
   },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@tailwindcss/oxide",
+      "esbuild",
+      "protobufjs",
+      "secp256k1",
+      "spawn-sync"
+    ]
+  },
   "devDependencies": {
     "turbo": "2.3.3",
     "typescript": "5.7.3",

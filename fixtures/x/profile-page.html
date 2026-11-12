@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>X Profile Page — Floors Fixture</title>
+    <style>
+      body { font-family: -apple-system, sans-serif; background: #fff; margin: 0; padding: 16px; }
+      .profile-header { padding: 16px; border-bottom: 1px solid #e1e8ed; margin-bottom: 16px; }
+      .tweet { border: 1px solid #e1e8ed; border-radius: 12px; padding: 12px; margin-bottom: 12px; max-width: 600px; }
+      .tweet-text { font-size: 15px; line-height: 1.5; color: #14171a; }
+      a[data-testid="cashtag"] { color: #1d9bf0; text-decoration: none; }
+    </style>
+  </head>
+  <body>
+    <div class="profile-header">
+      <strong style="font-size:18px;">CryptoKing</strong>
+      <p style="color:#536471;font-size:14px;margin:4px 0;">Ethereum validator. DeFi enthusiast. NFA.</p>
+    </div>
+
+    <!-- Pinned post -->
+    <article class="tweet" data-testid="tweet">
+      <div class="tweet-text">
+        My thesis: If you hold
+        <a data-testid="cashtag" href="/search?q=%24ETH&src=cashtag_click" role="link">$ETH</a>
+        for 4+ years, you are playing a different game than the traders. Long-term conviction.
+      </div>
+      <a href="/cryptoking/status/5001" style="display:none;">status</a>
+    </article>
+
+    <!-- Regular post -->
+    <article class="tweet" data-testid="tweet">
+      <div class="tweet-text">
+        Added more
+        <a data-testid="cashtag" href="/search?q=%24SOL&src=cashtag_click" role="link">$SOL</a>
+        to the portfolio today. Diversification is key.
+      </div>
+      <a href="/cryptoking/status/5002" style="display:none;">status</a>
+    </article>
+  </body>
+</html>

@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>X Timeline (Dark) — Floors Fixture</title>
+    <style>
+      body { font-family: -apple-system, sans-serif; background: #15202b; margin: 0; padding: 16px; }
+      .tweet { border: 1px solid #38444d; border-radius: 12px; padding: 12px; margin-bottom: 12px; }
+      .tweet-text { font-size: 15px; line-height: 1.5; color: #ffffff; }
+      a[data-testid="cashtag"] { color: #1d9bf0; text-decoration: none; }
+    </style>
+  </head>
+  <body>
+    <h1 style="font-size:14px;color:#8899a6;margin-bottom:16px;">Home / For You</h1>
+
+    <!-- Tweet 1: ETH cashtag -->
+    <article class="tweet" data-testid="tweet">
+      <div class="tweet-text">
+        Staking rewards are stacking.
+        <a data-testid="cashtag" href="/search?q=%24ETH&src=cashtag_click" role="link">$ETH</a>
+        to $10k EOY? Let's go 💎
+      </div>
+      <a href="/user/status/2001" style="display:none;">status link</a>
+    </article>
+
+    <!-- Tweet 2: SOL cashtag -->
+    <article class="tweet" data-testid="tweet">
+      <div class="tweet-text">
+        NFT floor prices on
+        <a data-testid="cashtag" href="/search?q=%24SOL&src=cashtag_click" role="link">$SOL</a>
+        are recovering fast.
+      </div>
+      <a href="/user/status/2002" style="display:none;">status link</a>
+    </article>
+
+    <!-- Tweet 3: no cashtag -->
+    <article class="tweet" data-testid="tweet">
+      <div class="tweet-text">
+        The macro picture is actually not that bad if you zoom out.
+      </div>
+    </article>
+  </body>
+</html>

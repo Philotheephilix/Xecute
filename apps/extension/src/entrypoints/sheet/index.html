@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Floors — Buy Crypto</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+        user-select: none;
+        -webkit-tap-highlight-color: transparent;
+      }
+
+      html,
+      body {
+        height: 100%;
+        font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont,
+          'Segoe UI', Roboto, sans-serif;
+        background: radial-gradient(circle at 50% 35%, #e8e4dc 0%, #c8c3ba 100%);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: #111111;
+      }
+
+      :root {
+        --orange: #ef7b28;
+        --orange-dark: #ed7725;
+        --teal: #29ceb4;
+        --bg-warm: #faf9f6;
+      }
+
+      .shadow-neo {
+        box-shadow: 0px 4px 0px #111111;
+      }
+      .shadow-neo-sm {
+        box-shadow: 0px 2.5px 0px #111111;
+      }
+
+      .screen {
+        transition: transform 0.4s cubic-bezier(0.22, 1, 0.36, 1),
+          opacity 0.35s ease;
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        overflow-y: auto;
+        overflow-x: hidden;
+        background-color: var(--bg-warm);
+      }
+      .screen-enter-right {
+        transform: translateX(100%);
+        opacity: 0;
+      }
+      .screen-active {
+        transform: translateX(0%);
+        opacity: 1;
+        z-index: 10;
+      }
+      .screen-exit-left {
+        transform: translateX(-30%);
+        opacity: 0;
+      }
+
+      #app-root {
+        position: relative;
+        width: 392px;
+        height: 680px;
+        background: #1a1a1a;
+        border-radius: 52px;
+        padding: 10px;
+        box-shadow: 0 25px 60px -15px rgba(0, 0, 0, 0.45),
+          0 0 0 1px rgba(255, 255, 255, 0.1);
+        border: 4px solid #2a2a2a;
+        overflow: hidden;
+      }
+
+      #phone-screen {
+        position: relative;
+        width: 100%;
+        height: 100%;
+        background: var(--bg-warm);
+        border-radius: 42px;
+        overflow: hidden;
+        border: 2px solid #111111;
+        display: flex;
+        flex-direction: column;
+      }
+
+      .btn-neo {
+        border: 2px solid #111111;
+        border-radius: 13px;
+        box-shadow: 0px 4px 0px #111111;
+        font-family: inherit;
+        font-weight: 800;
+        cursor: pointer;
+        transition: transform 0.1s ease, box-shadow 0.1s ease;
+        background: none;
+      }
+      .btn-neo:active {
+        transform: translateY(3px);
+        box-shadow: 0px 1px 0px #111111;
+      }
+
+      .btn-back {
+        width: 42px;
+        height: 42px;
+        background: white;
+        border: 2px solid #111111;
+        border-radius: 13px;
+        box-shadow: 0px 2.5px 0px #111111;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        flex-shrink: 0;
+      }
+      .btn-back:active {
+        transform: translateY(2px);
+        box-shadow: 0px 0.5px 0px #111111;
+      }
+
+      .toggle-track {
+        position: relative;
+        width: 48px;
+        height: 26px;
+        background: #e5e5e5;
+        border: 2px solid #111111;
+        border-radius: 13px;
+        cursor: pointer;
+        transition: background 0.2s ease;
+        flex-shrink: 0;
+      }
+      .toggle-track.on {
+        background: var(--teal);
+      }
+      .toggle-thumb {
+        position: absolute;
+        top: 2px;
+        left: 2px;
+        width: 18px;
+        height: 18px;
+        background: white;
+        border: 1.5px solid #111111;
+        border-radius: 50%;
+        transition: transform 0.2s ease;
+      }
+      .toggle-track.on .toggle-thumb {
+        transform: translateX(22px);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app-root">
+      <div id="phone-screen">
+        <div id="react-root" style="position: relative; flex: 1; overflow: hidden;"></div>
+      </div>
+    </div>
+    <script type="module" src="./index.tsx"></script>
+  </body>
+</html>
