@@ -1,0 +1,27 @@
+{
+  "name": "@floors/types",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc --build",
+    "generate": "echo 'TODO: generate from contract schema'",
+    "test": "echo 'no tests yet'",
+    "lint": "eslint src",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "zod": "3.25.67"
+  },
+  "devDependencies": {
+    "typescript": "5.7.3"
+  }
+}

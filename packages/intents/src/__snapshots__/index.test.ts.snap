@@ -1,0 +1,3 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`deriveChallenge > produces consistent challenge for known payload 1`] = `"a7f1ae9a3f517331929ef8231886d9ca59094d872a4166c0071611e6b854adb4"`;
