@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>X Quote Post with $ETH — Floors Fixture</title>
+    <style>
+      body { font-family: -apple-system, sans-serif; background: #fff; margin: 0; padding: 16px; }
+      .tweet { border: 1px solid #e1e8ed; border-radius: 12px; padding: 16px; max-width: 600px; margin-bottom: 12px; }
+      .quoted-tweet { border: 1px solid #e1e8ed; border-radius: 8px; padding: 12px; margin-top: 8px; background: #f7f9f9; }
+      .tweet-text { font-size: 15px; line-height: 1.5; color: #14171a; }
+      a[data-testid="cashtag"] { color: #1d9bf0; text-decoration: none; }
+    </style>
+  </head>
+  <body>
+    <!-- Outer post -->
+    <article class="tweet" data-testid="tweet">
+      <div class="tweet-text">
+        This analysis is spot-on.
+        <a data-testid="cashtag" href="/search?q=%24ETH&src=cashtag_click" role="link">$ETH</a>
+        is undervalued relative to its utility.
+      </div>
+
+      <!-- Quoted/embedded post -->
+      <div class="quoted-tweet" data-testid="tweet">
+        <div class="tweet-text">
+          My full valuation model for
+          <a data-testid="cashtag" href="/search?q=%24ETH&src=cashtag_click" role="link">$ETH</a>
+          using discounted cash flow of protocol fees.
+        </div>
+      </div>
+
+      <a href="/quoter/status/4001" style="display:none;">status</a>
+    </article>
+  </body>
+</html>

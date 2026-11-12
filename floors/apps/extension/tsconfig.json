@@ -1,8 +1,14 @@
 {
+  "$schema": "https://json.schemastore.org/tsconfig",
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx",
+    "jsxImportSource": "preact",
+    "outDir": "dist",
     "rootDir": "src",
-    "outDir": "dist"
+    "types": ["chrome"]
   },
-  "include": ["src"]
+  "include": ["src/**/*", "wxt.config.ts", "e2e/**/*"],
+  "exclude": ["node_modules", "dist", ".output"]
 }

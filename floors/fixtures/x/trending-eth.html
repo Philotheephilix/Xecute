@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>X Trending $ETH — Floors Fixture</title>
+    <style>
+      body { font-family: -apple-system, sans-serif; background: #fff; margin: 0; padding: 16px; }
+      .trending-header { font-size: 20px; font-weight: 700; margin-bottom: 16px; color: #14171a; }
+      .trending-tag { display: inline-flex; align-items: center; gap: 4px; margin-bottom: 16px; }
+      .tweet { border: 1px solid #e1e8ed; border-radius: 12px; padding: 12px; margin-bottom: 12px; max-width: 600px; }
+      .tweet-text { font-size: 15px; line-height: 1.5; color: #14171a; }
+      a[data-testid="cashtag"] { color: #1d9bf0; text-decoration: none; }
+    </style>
+  </head>
+  <body>
+    <div class="trending-header">
+      Trending:
+      <a data-testid="cashtag" href="/search?q=%24ETH&src=cashtag_click" role="link">$ETH</a>
+    </div>
+
+    <p style="color:#536471;font-size:14px;margin-bottom:16px;">248K posts in the last 24 hours</p>
+
+    <article class="tweet" data-testid="tweet">
+      <div class="tweet-text">
+        <a data-testid="cashtag" href="/search?q=%24ETH&src=cashtag_click" role="link">$ETH</a>
+        is trending for the first time this week. Volume is insane.
+      </div>
+      <a href="/trader1/status/6001" style="display:none;">status</a>
+    </article>
+
+    <article class="tweet" data-testid="tweet">
+      <div class="tweet-text">
+        Not financial advice but
+        <a data-testid="cashtag" href="/search?q=%24ETH&src=cashtag_click" role="link">$ETH</a>
+        chart looks very bullish on the weekly.
+      </div>
+      <a href="/ta/status/6002" style="display:none;">status</a>
+    </article>
+  </body>
+</html>

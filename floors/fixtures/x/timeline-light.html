@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>X Timeline (Light) — Floors Fixture</title>
+    <style>
+      body { font-family: -apple-system, sans-serif; background: #fff; margin: 0; padding: 16px; }
+      .tweet { border: 1px solid #e1e8ed; border-radius: 12px; padding: 12px; margin-bottom: 12px; }
+      .tweet-text { font-size: 15px; line-height: 1.5; color: #14171a; }
+    </style>
+  </head>
+  <body>
+    <h1 style="font-size:14px;color:#536471;margin-bottom:16px;">Home / For You</h1>
+
+    <!-- Tweet 1: ETH cashtag -->
+    <article class="tweet" data-testid="tweet">
+      <div class="tweet-text">
+        Just bought more
+        <a data-testid="cashtag" href="/search?q=%24ETH&src=cashtag_click" role="link">$ETH</a>
+        on the dip. The merge was just the beginning 🔥
+      </div>
+      <a href="/user/status/1001" style="display:none;">status link</a>
+    </article>
+
+    <!-- Tweet 2: SOL cashtag -->
+    <article class="tweet" data-testid="tweet">
+      <div class="tweet-text">
+        <a data-testid="cashtag" href="/search?q=%24SOL&src=cashtag_click" role="link">$SOL</a>
+        breaking out. Network activity is insane right now.
+      </div>
+      <a href="/user/status/1002" style="display:none;">status link</a>
+    </article>
+
+    <!-- Tweet 3: no cashtag -->
+    <article class="tweet" data-testid="tweet">
+      <div class="tweet-text">
+        Good morning crypto Twitter! Who's bullish today? 🚀
+      </div>
+    </article>
+
+    <!-- Tweet 4: ETH again -->
+    <article class="tweet" data-testid="tweet">
+      <div class="tweet-text">
+        DeFi summer 2.0 is here.
+        <a data-testid="cashtag" href="/search?q=%24ETH&src=cashtag_click" role="link">$ETH</a>
+        gas fees are finally reasonable.
+      </div>
+      <a href="/user/status/1004" style="display:none;">status link</a>
+    </article>
+  </body>
+</html>

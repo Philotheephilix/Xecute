@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>X Mixed Cashtags — Floors Fixture</title>
+    <style>
+      body { font-family: -apple-system, sans-serif; background: #fff; margin: 0; padding: 16px; }
+      .tweet { border: 1px solid #e1e8ed; border-radius: 12px; padding: 12px; margin-bottom: 12px; max-width: 600px; }
+      .tweet-text { font-size: 15px; line-height: 1.5; color: #14171a; }
+      a[data-testid="cashtag"] { color: #1d9bf0; text-decoration: none; }
+    </style>
+  </head>
+  <body>
+    <!--
+      This fixture contains:
+      - ETH (supported) → should get chip
+      - SOL (supported) → should get chip
+      - STRK (deferred per ADR-0006) → no chip
+      - BTC (not in S4 registry) → no chip
+    -->
+    <article class="tweet" data-testid="tweet">
+      <div class="tweet-text">
+        Portfolio breakdown:
+        <a data-testid="cashtag" href="/search?q=%24ETH&src=cashtag_click" role="link">$ETH</a>
+        40%,
+        <a data-testid="cashtag" href="/search?q=%24SOL&src=cashtag_click" role="link">$SOL</a>
+        30%,
+        <a data-testid="cashtag" href="/search?q=%24BTC&src=cashtag_click" role="link">$BTC</a>
+        20%,
+        <a data-testid="cashtag" href="/search?q=%24STRK&src=cashtag_click" role="link">$STRK</a>
+        10%. Let's ride 🚀
+      </div>
+      <a href="/portfolioguy/status/7001" style="display:none;">status</a>
+    </article>
+
+    <!-- Single ETH post -->
+    <article class="tweet" data-testid="tweet">
+      <div class="tweet-text">
+        Simple.
+        <a data-testid="cashtag" href="/search?q=%24ETH&src=cashtag_click" role="link">$ETH</a>
+        and chill.
+      </div>
+      <a href="/simple/status/7002" style="display:none;">status</a>
+    </article>
+  </body>
+</html>

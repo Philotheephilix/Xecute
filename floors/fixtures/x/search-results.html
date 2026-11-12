@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>X Search Results — Floors Fixture</title>
+    <style>
+      body { font-family: -apple-system, sans-serif; background: #fff; margin: 0; padding: 16px; }
+      .tweet { border: 1px solid #e1e8ed; border-radius: 12px; padding: 12px; margin-bottom: 12px; max-width: 600px; }
+      .tweet-text { font-size: 15px; line-height: 1.5; color: #14171a; }
+      a[data-testid="cashtag"] { color: #1d9bf0; text-decoration: none; }
+      .search-header { font-size: 20px; font-weight: 700; margin-bottom: 16px; color: #14171a; }
+    </style>
+  </head>
+  <body>
+    <div class="search-header">Search results for "$ETH"</div>
+
+    <article class="tweet" data-testid="tweet">
+      <div class="tweet-text">
+        <a data-testid="cashtag" href="/search?q=%24ETH&src=cashtag_click" role="link">$ETH</a>
+        broke the $5000 resistance after 18 months. All-time high incoming?
+      </div>
+      <a href="/trader/status/3001" style="display:none;">status</a>
+    </article>
+
+    <article class="tweet" data-testid="tweet">
+      <div class="tweet-text">
+        Compare
+        <a data-testid="cashtag" href="/search?q=%24ETH&src=cashtag_click" role="link">$ETH</a>
+        vs
+        <a data-testid="cashtag" href="/search?q=%24SOL&src=cashtag_click" role="link">$SOL</a>
+        — two very different value propositions.
+      </div>
+      <a href="/analyst/status/3002" style="display:none;">status</a>
+    </article>
+  </body>
+</html>
