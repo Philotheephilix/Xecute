@@ -299,6 +299,27 @@ describe('coverage gaps', () => {
     expect(() => a.format(-1)).toThrow(RangeError);
     expect(() => a.format(1.5)).toThrow(RangeError);
   });
+
+  // Line 69: scaleRaw floor branch — negative raw with downscale triggers r < 0n → q - 1n
+  it('scale negative value with floor rounds toward -∞ (covers scaleRaw floor r<0 branch)', () => {
+    // -1_500_000 at 6 decimals scaled to 0 with floor: -1.5 → -2
+    const a = new Amount(-1_500_000n, 6);
+    const b = a.scale(0, 'floor');
+    expect(b.raw).toBe(-2n);
+    expect(b.decimals).toBe(0);
+
+    // Exact negative: -2_000_000 → -2 (r === 0, no adjustment)
+    const c = new Amount(-2_000_000n, 6);
+    expect(c.scale(0, 'floor').raw).toBe(-2n);
+  });
+
+  // Line 99: Amount.parse non-string input throws TypeError at runtime
+  it('parse throws TypeError when value is not a string (runtime check)', () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect(() => Amount.parse(123 as any, 6)).toThrow(TypeError);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect(() => Amount.parse(null as any, 6)).toThrow(TypeError);
+  });
 });
 
 // ---------------------------------------------------------------------------
