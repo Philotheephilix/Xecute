@@ -31,14 +31,14 @@ export class FloorApiError extends Error {
   public readonly code: ErrorCode;
   public readonly retryable: boolean;
   public readonly statusCode: number;
-  public readonly details?: Record<string, unknown>;
+  public readonly details: Record<string, unknown>;
 
   constructor(
     code: ErrorCode,
     message: string,
     retryable: boolean,
     statusCode: number,
-    details?: Record<string, unknown>,
+    details: Record<string, unknown> = {},
   ) {
     super(message);
     this.name = 'FloorApiError';
@@ -54,7 +54,7 @@ export class FloorApiError extends Error {
         code: this.code,
         message: this.message,
         retryable: this.retryable,
-        details: this.details ?? {},
+        details: this.details,
       },
     };
   }
@@ -75,7 +75,7 @@ export function errorHandler(fastify: FastifyInstance): void {
             code: ERROR_CODES.VALIDATION_ERROR,
             message: error.message,
             retryable: false,
-            details: { validation: (error as FastifyError).validation },
+            details: { validation: (error as FastifyError).validation ?? [] },
           },
         };
         void reply.status(400).send(envelope);

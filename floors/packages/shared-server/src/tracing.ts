@@ -1,10 +1,7 @@
 import { NodeSDK } from '@opentelemetry/sdk-node';
 import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentations-node';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
-import {
-  trace,
-  type Tracer,
-} from '@opentelemetry/api';
+import { trace, type Tracer } from '@opentelemetry/api';
 import { Resource } from '@opentelemetry/resources';
 import { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } from '@opentelemetry/semantic-conventions';
 
@@ -18,11 +15,13 @@ export function initTracing(serviceName: string, version: string): void {
     [ATTR_SERVICE_VERSION]: version,
   });
 
+  const traceExporter = exporterEndpoint !== undefined
+    ? new OTLPTraceExporter({ url: exporterEndpoint })
+    : undefined;
+
   sdk = new NodeSDK({
     resource,
-    traceExporter: exporterEndpoint !== undefined
-      ? new OTLPTraceExporter({ url: exporterEndpoint })
-      : undefined,
+    ...(traceExporter !== undefined ? { traceExporter } : {}),
     instrumentations: [getNodeAutoInstrumentations()],
   });
 
