@@ -1,0 +1,11 @@
+[package]
+name = "floors"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+floors-types = { path = "../floors-types" }
+
+[lib]
+crate-type = ["cdylib", "rlib"]

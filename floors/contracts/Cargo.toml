@@ -1,0 +1,24 @@
+[workspace]
+resolver = "2"
+members = [
+    "floors",
+    "floors-types",
+    "mocks/mock-ft",
+    "mocks/mock-pyth",
+]
+
+[workspace.package]
+version = "0.0.1"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+[workspace.dependencies]
+# shared deps go here once needed
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+
+[profile.dev]
+opt-level = 0

@@ -1,0 +1,10 @@
+[package]
+name = "floors-types"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+
+[lib]
+crate-type = ["rlib"]

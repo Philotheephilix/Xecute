@@ -1,0 +1,9 @@
+# Global rule — all files require review from philotheephilix
+* @philotheephilix
+
+# contracts/ requires 2 reviews
+# (enforce via branch protection: require 2 approvals for paths matching contracts/**)
+contracts/ @philotheephilix
+
+# intents package
+packages/intents/ @philotheephilix
