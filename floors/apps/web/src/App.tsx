@@ -55,9 +55,13 @@ export default function App() {
     { screen: 'welcome', className: 'screen-active' },
   ]);
   const isTransitioning = useRef(false);
+  const pendingNavigate = useRef<Screen | null>(null);
 
   const navigate = (to: Screen) => {
-    if (isTransitioning.current) return;
+    if (isTransitioning.current) {
+      pendingNavigate.current = to;
+      return;
+    }
 
     setScreens((prev) => {
       const active = prev.find((s) => s.className === 'screen-active');
@@ -102,7 +106,7 @@ export default function App() {
     });
   };
 
-  // Clean up exited screens after transition
+  // Clean up exited screens after transition; flush any queued navigation
   useEffect(() => {
     const timer = setTimeout(() => {
       isTransitioning.current = false;
@@ -111,8 +115,15 @@ export default function App() {
         if (!active) return prev;
         return [active];
       });
+      // Flush a navigate that was queued while we were transitioning
+      const next = pendingNavigate.current;
+      if (next !== null) {
+        pendingNavigate.current = null;
+        navigate(next);
+      }
     }, 450);
     return () => clearTimeout(timer);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [screens]);
 
   const renderScreen = (s: ScreenState) => {
