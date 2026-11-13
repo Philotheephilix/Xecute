@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import type { Screen, AccountState } from '../App';
 
 interface Props {
@@ -10,7 +11,24 @@ interface Props {
 const REQUIRE_INVITE =
   (import.meta as ImportMeta & { env: Record<string, string> }).env['VITE_REQUIRE_INVITE'] === 'true';
 
-export default function Welcome({ navigate, className }: Props) {
+export default function Welcome({ navigate, setAccount, className }: Props) {
+  const [signInError, setSignInError] = useState<string | null>(null);
+
+  const handleSignIn = () => {
+    const accountId = localStorage.getItem('floors:account_id');
+    const credentialId = localStorage.getItem('floors:credential_id');
+    const publicKey = localStorage.getItem('floors:public_key');
+
+    if (!accountId || !credentialId || !publicKey) {
+      setSignInError('No existing account found.');
+      return;
+    }
+
+    const compressedKeyHex = localStorage.getItem('floors:compressed_key') ?? '';
+    setSignInError(null);
+    setAccount({ accountId, credentialId, publicKey, compressedKeyHex });
+    navigate('portfolio');
+  };
   return (
     <div className={className}>
       <div className="flex flex-col items-center justify-between min-h-full px-6 py-12">
@@ -25,14 +43,17 @@ export default function Welcome({ navigate, className }: Props) {
               className="inline-flex items-center gap-1.5 px-4 py-2 bg-[#EF7B28] text-white border-2 border-[#111] rounded-full text-sm font-extrabold shadow-neo"
               style={{ transform: 'rotate(5deg)' }}
             >
-              ✦ Floors
+              ✦ Xecute
             </span>
           </div>
 
           {/* Logo wordmark */}
-          <h1 className="text-7xl font-black text-[#111] tracking-tight leading-none">
-            Floors
-          </h1>
+          <img
+            src="/brand/xecute-logo.svg"
+            alt="Xecute"
+            className="h-12 w-auto"
+            draggable={false}
+          />
 
           {/* Tagline */}
           <p className="text-xl font-bold text-gray-600 text-center leading-snug">
@@ -68,11 +89,14 @@ export default function Welcome({ navigate, className }: Props) {
             Already have an account?{' '}
             <button
               className="text-gray-700 font-bold underline underline-offset-2"
-              onClick={() => navigate('portfolio')}
+              onClick={handleSignIn}
             >
               Sign in
             </button>
           </p>
+          {signInError !== null && (
+            <p className="text-center text-sm font-semibold text-[#EF7B28]">{signInError}</p>
+          )}
         </div>
       </div>
     </div>

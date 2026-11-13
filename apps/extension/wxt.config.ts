@@ -6,6 +6,8 @@ export default defineConfig({
   manifest: {
     name: 'Floors',
     description: 'Buy crypto from X posts',
+    icons: { 16: '/icon.svg', 32: '/icon.svg', 48: '/icon.svg', 128: '/icon.svg' },
+    action: { default_icon: { 16: '/icon.svg', 32: '/icon.svg', 48: '/icon.svg' } },
     permissions: ['storage', 'scripting'],
     // http://localhost:* is included for E2E smoke tests (fixture server).
     // Production content scripts only match x.com/twitter.com.

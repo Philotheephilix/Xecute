@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 56 60" width="56" height="60" fill="none">
+  <defs>
+    <linearGradient id="xecute-icon-orange" x1="4" y1="4" x2="52" y2="52" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#F5882E" />
+      <stop offset="100%" stop-color="#EA6B19" />
+    </linearGradient>
+  </defs>
+
+  <!-- Hard Neo-Brutalist Shadow -->
+  <rect x="4" y="8" width="48" height="48" rx="13" fill="#111111" />
+
+  <!-- Icon Badge -->
+  <rect x="4" y="4" width="48" height="48" rx="13" fill="url(#xecute-icon-orange)" stroke="#111111" stroke-width="2.5" />
+
+  <!-- Minimal Execution 'X' Mark -->
+  <path d="M18 19L26.5 28L18 37" stroke="#FFFFFF" stroke-width="4.2" stroke-linecap="round" stroke-linejoin="round" />
+  <path d="M38 19L29.5 28L38 37" stroke="#FFFFFF" stroke-width="4.2" stroke-linecap="round" stroke-linejoin="round" />
+</svg>
