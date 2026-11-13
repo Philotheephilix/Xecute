@@ -23,11 +23,11 @@ pub struct FloorOpenedEvent {
     pub qty: String,
     pub floor_price_e6: String,
     pub reserved_usdc: String,
-    pub expires_ns: String,
-    /// Total fee charged to the buyer (backer share + platform share).
     pub fee_usdc: String,
-    /// Platform portion of the fee.
     pub platform_fee_usdc: String,
+    /// Sleeve that backs this floor.
+    pub sleeve: String,
+    pub expires_ns: String,
     /// Unique quote id that was consumed to open this floor.
     pub quote_id: String,
 }
@@ -35,6 +35,7 @@ pub struct FloorOpenedEvent {
 #[derive(Serialize)]
 pub struct FloorClosedEvent {
     pub floor_id: u64,
+    pub owner: String,
     /// Tokens returned to the owner.
     pub qty_returned: String,
     /// USDC unlocked from reservation back to the sleeve.
@@ -44,6 +45,8 @@ pub struct FloorClosedEvent {
 #[derive(Serialize)]
 pub struct FloorSoldEvent {
     pub floor_id: u64,
+    pub owner: String,
+    pub qty: String,
     /// USDC paid out to the owner.
     pub paid_usdc: String,
     /// Account that triggered the sell (owner or auto_protect_bot).
@@ -53,6 +56,7 @@ pub struct FloorSoldEvent {
 #[derive(Serialize)]
 pub struct FloorExpiredEvent {
     pub floor_id: u64,
+    pub owner: String,
     /// Tokens returned to the owner after expiry.
     pub qty_returned: String,
     /// USDC unlocked from reservation back to the sleeve.
@@ -73,7 +77,8 @@ pub struct PayoutFailedEvent {
     pub floor_id: String,
     pub owner: String,
     pub asset: String,
-    pub qty: String,
+    /// Amount that failed to pay out.
+    pub amount: String,
     pub reason: String,
 }
 
@@ -82,8 +87,10 @@ pub struct PayoutRetriedEvent {
     pub floor_id: String,
     pub owner: String,
     pub asset: String,
-    pub qty: String,
-    pub tx_hash: String,
+    /// Amount retried.
+    pub amount: String,
+    /// Whether the retry succeeded.
+    pub ok: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -92,22 +99,22 @@ pub struct PayoutRetriedEvent {
 
 #[derive(Serialize)]
 pub struct UnwindStartedEvent {
-    pub sleeve_id: String,
+    pub unwind_id: String,
     pub asset: String,
     pub qty: String,
+    pub deposit_account: String,
+    pub min_usdc_out: String,
 }
 
 #[derive(Serialize)]
 pub struct UnwindSettledEvent {
-    pub sleeve_id: String,
-    pub asset: String,
+    pub unwind_id: String,
     pub usdc_received: String,
-    pub epoch: u64,
 }
 
 #[derive(Serialize)]
 pub struct UnwindShortEvent {
-    pub sleeve_id: String,
+    pub unwind_id: String,
     pub shortfall_usdc: String,
 }
 
@@ -117,15 +124,16 @@ pub struct UnwindShortEvent {
 
 #[derive(Serialize)]
 pub struct ReconciledEvent {
-    pub sleeve_id: String,
-    pub epoch: u64,
-    pub pnl_usdc: String,
+    pub asset: String,
+    pub held: String,
+    pub actual: String,
 }
 
 #[derive(Serialize)]
 pub struct ShortfallPausedEvent {
-    pub sleeve_id: String,
-    pub shortfall_usdc: String,
+    pub asset: String,
+    pub held: String,
+    pub actual: String,
 }
 
 // ---------------------------------------------------------------------------
@@ -142,15 +150,15 @@ pub struct ParamsAppliedEvent {}
 
 #[derive(Serialize)]
 pub struct ChangeQueuedEvent {
-    pub change_type: String,
-    pub value: String,
-    pub apply_after: u64,
+    pub change_id: String,
+    pub kind: String,
+    pub eta_ns: u64,
 }
 
 #[derive(Serialize)]
 pub struct ChangeAppliedEvent {
-    pub change_type: String,
-    pub value: String,
+    pub change_id: String,
+    pub kind: String,
 }
 
 // ---------------------------------------------------------------------------
@@ -159,12 +167,14 @@ pub struct ChangeAppliedEvent {
 
 #[derive(Serialize)]
 pub struct PausedEvent {
-    pub feature: String,
+    pub scope: String,
+    pub by: String,
 }
 
 #[derive(Serialize)]
 pub struct UnpausedEvent {
-    pub feature: String,
+    pub scope: String,
+    pub by: String,
 }
 
 // ---------------------------------------------------------------------------

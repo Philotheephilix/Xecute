@@ -20,6 +20,26 @@ pub struct AssetConfig {
     pub max_qty: u128,
     pub max_open_floors: u32,
     pub pyth_price_id: [u8; 32],
+    /// Allowed (floor_bps, duration_secs) product pairs. Empty = all allowed.
+    pub allowed_products: Vec<(u32, u64)>,
+    /// Maximum total reserved USDC across all open floors for this asset.
+    pub max_open_floor_usdc: u128,
+    /// Whether new floors for this asset are paused.
+    pub paused: bool,
+}
+
+/// Unwind configuration stored in Params.
+#[near(serializers = [borsh, json])]
+#[derive(Debug, Clone)]
+pub struct UnwindConfig {
+    /// Minimum USDC received vs expected, in basis points (slippage protection).
+    pub min_usdc_out_bps: u32,
+    /// Account to send tokens to for unwind via 1Click.
+    pub deposit_account: AccountId,
+    /// Maximum tokens per unwind transaction.
+    pub max_unwind_qty: u128,
+    /// Minimum seconds between unwinds for the same sleeve.
+    pub cooldown_secs: u32,
 }
 
 /// Per-sleeve configuration stored in Params.
@@ -49,6 +69,8 @@ pub struct Params {
     pub assets: HashMap<AssetId, AssetConfig>,
     /// Per-sleeve configuration (utilization cap, per-asset share caps).
     pub sleeves: HashMap<SleeveId, SleeveConfig>,
+    /// Unwind configuration (slippage, deposit account, caps, cooldown).
+    pub unwind: UnwindConfig,
 }
 
 impl Params {
@@ -69,6 +91,12 @@ impl Params {
             expire_batch_max: 50,
             assets: HashMap::new(),
             sleeves: HashMap::new(),
+            unwind: UnwindConfig {
+                min_usdc_out_bps: 9500, // 95% minimum USDC received
+                deposit_account: "intents.near".parse().unwrap(),
+                max_unwind_qty: u128::MAX,
+                cooldown_secs: 3600,
+            },
         }
     }
 }

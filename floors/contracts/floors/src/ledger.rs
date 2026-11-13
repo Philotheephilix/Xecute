@@ -2,18 +2,18 @@ use crate::state::Totals;
 
 impl Totals {
     /// Token-side invariant:
-    /// held >= escrow + delivered + unwinding + pending + credits
+    /// held == escrow + delivered + credits + pending
+    /// (unwinding tokens have already left `held` when sent to 1Click)
     pub fn assert_solvent(&self, asset: &str) {
         let token_side = self
             .escrow
             .saturating_add(self.delivered)
-            .saturating_add(self.unwinding)
-            .saturating_add(self.pending)
-            .saturating_add(self.credits);
+            .saturating_add(self.credits)
+            .saturating_add(self.pending);
         near_sdk::require!(
             self.held >= token_side,
             format!(
-                "INVARIANT_VIOLATED: {asset} held={} < escrow+delivered+unwinding+pending+credits={}",
+                "INVARIANT_VIOLATED: {asset} held={} < escrow+delivered+credits+pending={}",
                 self.held, token_side
             )
         );
