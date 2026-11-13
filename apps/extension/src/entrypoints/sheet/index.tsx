@@ -1,32 +1,45 @@
 /**
  * Floors Buy Sheet — extension popup page entrypoint.
- * Re-exports the sheet component.
+ *
+ * P1-C: Real quote → sign → submit → SSE status flow.
+ * WYSIWYS: user sees exact amounts before signing.
  */
 
 import { h, render, Fragment } from 'preact';
-import { useState, useCallback } from 'preact/hooks';
+import { useState, useCallback, useEffect } from 'preact/hooks';
 import { browser } from 'wxt/browser';
 import { signWithPasskey } from '../../lib/webauthn.js';
 
+const API_URL = 'http://localhost:3001';
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-type Screen = 'buy' | 'success';
+type Screen = 'buy' | 'signing' | 'success' | 'error';
+
+interface DraftQuote {
+  quote_id: string;
+  asset: string;
+  pay_usdc: string;
+  est_qty: string;
+  expires_at: string;
+  display: {
+    you_pay: string;
+    est_amount: string;
+    expires: string;
+  };
+}
 
 interface SheetState {
   ticker: string;
   postId: string | undefined;
   screen: Screen;
-  amount: string;
-  floorProtection: boolean;
   signing: boolean;
-  txDetails: TxDetails | null;
-}
-
-interface TxDetails {
-  ticker: string;
-  amount: string;
-  floorProtection: boolean;
-  credentialId: string;
+  statusId: string | null;
+  txHash: string | null;
+  errorMsg: string | null;
+  draftQuote: DraftQuote | null;
+  draftLoading: boolean;
+  draftError: string | null;
 }
 
 // ── URL params ────────────────────────────────────────────────────────────────
@@ -36,18 +49,6 @@ function getParams(): { ticker: string; postId: string | undefined } {
   const ticker = params.get('ticker') ?? 'ETH';
   const postId = params.get('postId') ?? undefined;
   return { ticker, postId };
-}
-
-// ── Fee calculation ───────────────────────────────────────────────────────────
-
-function calculateFees(amount: string, floorProtection: boolean) {
-  const num = parseFloat(amount) || 0;
-  const floorFee = floorProtection ? num * 0.005 : 0;
-  const protectedValue = floorProtection ? num * 0.97 : 0;
-  return {
-    floorFee: floorFee.toFixed(2),
-    protectedValue: protectedValue.toFixed(2),
-  };
 }
 
 // ── SVG icons ─────────────────────────────────────────────────────────────────
@@ -92,24 +93,12 @@ function CheckCircle() {
 
 interface BuyScreenProps {
   state: SheetState;
-  onAmountChange: (v: string) => void;
-  onToggleFloor: () => void;
   onConfirm: () => void;
   onBack: () => void;
 }
 
-function BuyScreen({
-  state,
-  onAmountChange,
-  onToggleFloor,
-  onConfirm,
-  onBack,
-}: BuyScreenProps) {
-  const { floorFee, protectedValue } = calculateFees(
-    state.amount,
-    state.floorProtection,
-  );
-  const hasAmount = parseFloat(state.amount) > 0;
+function BuyScreen({ state, onConfirm, onBack }: BuyScreenProps) {
+  const { draftQuote, draftLoading, draftError, ticker, signing } = state;
 
   return (
     <div
@@ -137,8 +126,7 @@ function BuyScreen({
             Buy Crypto
           </div>
           <div style={{ fontSize: '20px', fontWeight: 800, color: '#111111', lineHeight: 1.2 }}>
-            {/* Safe: ticker is a validated string from URL params */}
-            Buy ${state.ticker}
+            Buy ${ticker}
           </div>
         </div>
         <div
@@ -152,8 +140,7 @@ function BuyScreen({
             boxShadow: '0px 2.5px 0px #111111',
           }}
         >
-          {/* Safe: ticker is validated */}
-          ${state.ticker}
+          ${ticker}
         </div>
       </div>
 
@@ -167,7 +154,7 @@ function BuyScreen({
           gap: '16px',
         }}
       >
-        {/* Amount input */}
+        {/* WYSIWYS Quote Card */}
         <div
           style={{
             background: 'white',
@@ -175,127 +162,51 @@ function BuyScreen({
             borderRadius: '18px',
             padding: '16px',
             boxShadow: '0px 4px 0px #111111',
-          }}
-        >
-          <div
-            style={{
-              fontSize: '12px',
-              fontWeight: 700,
-              color: '#6b7280',
-              marginBottom: '8px',
-              textTransform: 'uppercase',
-              letterSpacing: '0.05em',
-            }}
-          >
-            Amount (USD)
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span style={{ fontSize: '32px', fontWeight: 800, color: '#111111', lineHeight: 1 }}>
-              $
-            </span>
-            <input
-              type="number"
-              min="1"
-              step="any"
-              placeholder="0.00"
-              value={state.amount}
-              onInput={(e) => onAmountChange((e.target as HTMLInputElement).value)}
-              style={{
-                flex: 1,
-                fontSize: '32px',
-                fontWeight: 800,
-                color: '#111111',
-                background: 'transparent',
-                border: 'none',
-                outline: 'none',
-                fontFamily: 'inherit',
-                lineHeight: 1,
-              }}
-              aria-label="Amount in USD"
-            />
-          </div>
-        </div>
-
-        {/* Floor protection toggle */}
-        <div
-          style={{
-            background: 'white',
-            border: '2px solid #111111',
-            borderRadius: '18px',
-            padding: '14px 16px',
-            boxShadow: '0px 4px 0px #111111',
             display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
+            flexDirection: 'column',
+            gap: '10px',
           }}
+          aria-label="Quote details"
         >
-          <div>
-            <div style={{ fontSize: '14px', fontWeight: 800, color: '#111111' }}>
-              Floor Protection
-            </div>
-            <div style={{ fontSize: '11.5px', fontWeight: 600, color: '#6b7280', marginTop: '2px' }}>
-              Limit downside risk
-            </div>
+          <div style={{ fontSize: '12px', fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+            Order Preview
           </div>
-          <div
-            style={{ display: 'flex', alignItems: 'center', gap: '10px' }}
-            role="switch"
-            aria-checked={state.floorProtection}
-            tabIndex={0}
-            onClick={onToggleFloor}
-            onKeyDown={(e) => {
-              if (e.key === ' ' || e.key === 'Enter') onToggleFloor();
-            }}
-          >
-            <div class={`toggle-track${state.floorProtection ? ' on' : ''}`}>
-              <div class="toggle-thumb" />
-            </div>
-            <span
-              style={{
-                fontSize: '12px',
-                fontWeight: 800,
-                color: state.floorProtection ? '#29CEB4' : '#9ca3af',
-              }}
-            >
-              {state.floorProtection ? 'ON' : 'OFF'}
-            </span>
-          </div>
-        </div>
 
-        {/* Fee preview */}
-        {state.floorProtection && hasAmount && (
-          <div
-            style={{
-              background: 'white',
-              border: '2px solid #111111',
-              borderRadius: '18px',
-              padding: '14px 16px',
-              boxShadow: '0px 4px 0px #111111',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '8px',
-            }}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontSize: '12.5px', fontWeight: 600, color: '#6b7280' }}>
-                Floor fee
-              </span>
-              <span style={{ fontSize: '13px', fontWeight: 800, color: '#111111' }}>
-                {/* Safe: numeric computation */}
-                ${floorFee}
-              </span>
+          {draftLoading && (
+            <div style={{ fontSize: '14px', color: '#6b7280', textAlign: 'center', padding: '8px 0' }}>
+              Fetching best price...
             </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontSize: '12.5px', fontWeight: 600, color: '#6b7280' }}>
-                Protected value
-              </span>
-              <span style={{ fontSize: '13px', fontWeight: 800, color: '#29CEB4' }}>
-                {/* Safe: numeric computation */}
-                ${protectedValue}
-              </span>
+          )}
+
+          {draftError !== null && !draftLoading && (
+            <div style={{ fontSize: '13px', color: '#ef4444', fontWeight: 600 }}>
+              {draftError}
             </div>
-          </div>
-        )}
+          )}
+
+          {draftQuote !== null && !draftLoading && (
+            <>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: '12.5px', fontWeight: 600, color: '#6b7280' }}>Buying</span>
+                <span style={{ fontSize: '15px', fontWeight: 800, color: '#111111' }} data-testid="est-amount">
+                  ~{draftQuote.display.est_amount} {ticker}
+                </span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: '12.5px', fontWeight: 600, color: '#6b7280' }}>Paying</span>
+                <span style={{ fontSize: '15px', fontWeight: 800, color: '#111111' }} data-testid="you-pay">
+                  ${draftQuote.display.you_pay} USDC
+                </span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: '12.5px', fontWeight: 600, color: '#6b7280' }}>Quote expires</span>
+                <span style={{ fontSize: '12px', fontWeight: 600, color: '#9ca3af' }}>
+                  {draftQuote.display.expires}
+                </span>
+              </div>
+            </>
+          )}
+        </div>
 
         <div style={{ flex: 1 }} />
 
@@ -303,11 +214,11 @@ function BuyScreen({
         <button
           class="btn-neo"
           onClick={onConfirm}
-          disabled={state.signing || !hasAmount}
+          disabled={signing || draftQuote === null || draftLoading}
           style={{
             width: '100%',
             height: '52px',
-            background: state.signing || !hasAmount ? '#cccccc' : '#EF7B28',
+            background: signing || draftQuote === null ? '#cccccc' : '#EF7B28',
             color: '#111111',
             fontSize: '15px',
             fontWeight: 800,
@@ -315,11 +226,12 @@ function BuyScreen({
             alignItems: 'center',
             justifyContent: 'center',
             gap: '8px',
-            cursor: state.signing ? 'wait' : !hasAmount ? 'not-allowed' : 'pointer',
+            opacity: (signing || draftQuote === null) ? 0.7 : 1,
+            cursor: (signing || draftQuote === null) ? 'wait' : 'pointer',
           }}
-          aria-busy={state.signing}
+          aria-busy={signing}
         >
-          {state.signing ? (
+          {signing ? (
             'Verifying...'
           ) : (
             <>
@@ -333,14 +245,37 @@ function BuyScreen({
   );
 }
 
+// ── Signing screen ────────────────────────────────────────────────────────────
+
+function SigningScreen({ statusId }: { statusId: string | null }) {
+  return (
+    <div
+      class="screen screen-active"
+      style={{ padding: '32px 18px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '400px' }}
+    >
+      <div style={{ fontSize: '16px', fontWeight: 700, color: '#111111', marginBottom: '8px' }}>
+        Submitting Order...
+      </div>
+      {statusId !== null && (
+        <div style={{ fontSize: '12px', color: '#9ca3af' }} data-testid="status-id">
+          {statusId}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Success screen ────────────────────────────────────────────────────────────
 
 interface SuccessScreenProps {
-  txDetails: TxDetails;
+  ticker: string;
+  draftQuote: DraftQuote | null;
+  statusId: string | null;
+  txHash: string | null;
   onViewPortfolio: () => void;
 }
 
-function SuccessScreen({ txDetails, onViewPortfolio }: SuccessScreenProps) {
+function SuccessScreen({ ticker, draftQuote, statusId, txHash, onViewPortfolio }: SuccessScreenProps) {
   return (
     <div
       class="screen screen-enter-right screen-active"
@@ -357,7 +292,6 @@ function SuccessScreen({ txDetails, onViewPortfolio }: SuccessScreenProps) {
           gap: '24px',
         }}
       >
-        {/* Checkmark circle */}
         <div
           style={{
             width: '96px',
@@ -374,7 +308,6 @@ function SuccessScreen({ txDetails, onViewPortfolio }: SuccessScreenProps) {
           <CheckCircle />
         </div>
 
-        {/* Heading */}
         <div style={{ textAlign: 'center' }}>
           <div style={{ fontSize: '24px', fontWeight: 800, color: '#111111', lineHeight: 1.2 }}>
             Order Submitted!
@@ -384,7 +317,6 @@ function SuccessScreen({ txDetails, onViewPortfolio }: SuccessScreenProps) {
           </div>
         </div>
 
-        {/* Transaction details card */}
         <div
           style={{
             width: '100%',
@@ -398,50 +330,48 @@ function SuccessScreen({ txDetails, onViewPortfolio }: SuccessScreenProps) {
             gap: '10px',
           }}
         >
-          <div
-            style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              paddingBottom: '8px',
-              borderBottom: '1.5px solid #e5e7eb',
-            }}
-          >
+          <div style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: '8px', borderBottom: '1.5px solid #e5e7eb' }}>
             <span style={{ fontSize: '12px', fontWeight: 600, color: '#6b7280' }}>Token</span>
-            <span style={{ fontSize: '13px', fontWeight: 800, color: '#111111' }}>
-              {/* Safe: ticker validated */}
-              ${txDetails.ticker}
-            </span>
+            <span style={{ fontSize: '13px', fontWeight: 800, color: '#111111' }}>${ticker}</span>
           </div>
-          <div
-            style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              paddingBottom: '8px',
-              borderBottom: '1.5px solid #e5e7eb',
-            }}
-          >
-            <span style={{ fontSize: '12px', fontWeight: 600, color: '#6b7280' }}>Amount</span>
-            <span style={{ fontSize: '13px', fontWeight: 800, color: '#111111' }}>
-              {/* Safe: numeric */}
-              ${txDetails.amount}
-            </span>
-          </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-            <span style={{ fontSize: '12px', fontWeight: 600, color: '#6b7280' }}>Floor Protection</span>
-            <span
-              style={{
-                fontSize: '13px',
-                fontWeight: 800,
-                color: txDetails.floorProtection ? '#29CEB4' : '#111111',
-              }}
-            >
-              {txDetails.floorProtection ? 'Active' : 'Off'}
-            </span>
-          </div>
+
+          {draftQuote !== null && (
+            <>
+              <div style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: '8px', borderBottom: '1.5px solid #e5e7eb' }}>
+                <span style={{ fontSize: '12px', fontWeight: 600, color: '#6b7280' }}>Amount</span>
+                <span style={{ fontSize: '13px', fontWeight: 800, color: '#111111' }}>
+                  ~{draftQuote.display.est_amount} {ticker}
+                </span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: '8px', borderBottom: '1.5px solid #e5e7eb' }}>
+                <span style={{ fontSize: '12px', fontWeight: 600, color: '#6b7280' }}>Paid</span>
+                <span style={{ fontSize: '13px', fontWeight: 800, color: '#111111' }}>
+                  ${draftQuote.display.you_pay} USDC
+                </span>
+              </div>
+            </>
+          )}
+
+          {statusId !== null && (
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <span style={{ fontSize: '12px', fontWeight: 600, color: '#6b7280' }}>Order ID</span>
+              <span style={{ fontSize: '11px', fontWeight: 700, color: '#9ca3af', fontFamily: 'monospace' }} data-testid="status-id">
+                {statusId.slice(0, 8)}...
+              </span>
+            </div>
+          )}
+
+          {txHash !== null && (
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <span style={{ fontSize: '12px', fontWeight: 600, color: '#6b7280' }}>Tx Hash</span>
+              <span style={{ fontSize: '11px', fontWeight: 700, color: '#9ca3af', fontFamily: 'monospace' }}>
+                {txHash.slice(0, 10)}...
+              </span>
+            </div>
+          )}
         </div>
       </div>
 
-      {/* View portfolio button */}
       <div style={{ padding: '0 18px 24px' }}>
         <button
           class="btn-neo"
@@ -462,6 +392,27 @@ function SuccessScreen({ txDetails, onViewPortfolio }: SuccessScreenProps) {
   );
 }
 
+// ── Error screen ──────────────────────────────────────────────────────────────
+
+function ErrorScreen({ message, onRetry }: { message: string; onRetry: () => void }) {
+  return (
+    <div
+      class="screen screen-active"
+      style={{ padding: '32px 18px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '16px' }}
+    >
+      <div style={{ fontSize: '20px', fontWeight: 800, color: '#ef4444' }}>Order Failed</div>
+      <div style={{ fontSize: '13px', fontWeight: 600, color: '#6b7280', textAlign: 'center' }}>{message}</div>
+      <button
+        class="btn-neo"
+        onClick={onRetry}
+        style={{ width: '100%', height: '52px', background: '#EF7B28', color: '#111111', fontSize: '15px', fontWeight: 800 }}
+      >
+        Try Again
+      </button>
+    </div>
+  );
+}
+
 // ── App ───────────────────────────────────────────────────────────────────────
 
 function App() {
@@ -471,65 +422,175 @@ function App() {
     ticker,
     postId,
     screen: 'buy',
-    amount: '',
-    floorProtection: false,
     signing: false,
-    txDetails: null,
+    statusId: null,
+    txHash: null,
+    errorMsg: null,
+    draftQuote: null,
+    draftLoading: true,
+    draftError: null,
   });
+
+  // ── Fetch draft quote on mount ────────────────────────────────────────────
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function fetchDraft() {
+      try {
+        const res = await fetch(
+          `${API_URL}/v1/quotes/draft?asset=${encodeURIComponent(ticker)}&usd=10`,
+        );
+        if (!res.ok) {
+          const text = await res.text().catch(() => '');
+          throw new Error(`Quote API ${res.status}: ${text}`);
+        }
+        const data = await res.json() as DraftQuote;
+        if (!cancelled) {
+          setState((s) => ({ ...s, draftQuote: data, draftLoading: false, draftError: null }));
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (!cancelled) {
+          setState((s) => ({ ...s, draftLoading: false, draftError: `Could not fetch quote: ${msg}` }));
+        }
+      }
+    }
+
+    void fetchDraft();
+    return () => { cancelled = true; };
+  }, [ticker]);
+
+  // ── Handlers ─────────────────────────────────────────────────────────────
 
   const handleBack = useCallback(() => {
     window.close();
   }, []);
 
-  const handleAmountChange = useCallback((value: string) => {
-    setState((s) => ({ ...s, amount: value }));
-  }, []);
-
-  const handleToggleFloor = useCallback(() => {
-    setState((s) => ({ ...s, floorProtection: !s.floorProtection }));
-  }, []);
-
   const handleConfirm = useCallback(async () => {
-    const amount = parseFloat(state.amount);
-    if (!amount || amount <= 0) return;
+    const { draftQuote: quote } = state;
+    if (quote === null) return;
 
     setState((s) => ({ ...s, signing: true }));
 
     try {
+      // Build challenge: SHA-256(JSON.stringify({ ticker, amount_usdc, quote_id }))
+      const challengePayload = JSON.stringify({
+        ticker: state.ticker,
+        amount_usdc: quote.pay_usdc,
+        quote_id: quote.quote_id,
+      });
       const encoder = new TextEncoder();
-      const challengeText = `floors:buy:${state.ticker}:${state.amount}:${Date.now()}`;
-      const challenge = encoder.encode(challengeText);
+      const hashBuffer = await crypto.subtle.digest('SHA-256', encoder.encode(challengePayload));
+      const challenge = new Uint8Array(hashBuffer);
 
+      // Sign with passkey (virtual CTAP2 in tests, real Face ID in production)
       const assertion = await signWithPasskey(challenge);
 
+      // Hex-encode signature
       const sigHex = Array.from(assertion.signature)
         .map((b) => b.toString(16).padStart(2, '0'))
         .join('');
-      const credIdHex = btoa(assertion.credentialId);
 
-      await browser.runtime.sendMessage({
-        type: 'SHEET_SIGNED',
-        ticker: state.ticker,
-        signature: sigHex,
-        publicKey: credIdHex,
+      const credentialId = assertion.credentialId;
+      const idempotencyKey = crypto.randomUUID();
+
+      // POST /v1/submit
+      const submitRes = await fetch(`${API_URL}/v1/submit`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': idempotencyKey,
+        },
+        body: JSON.stringify({
+          quote_id: quote.quote_id,
+          assertion: {
+            signature: sigHex,
+            credential_id: credentialId,
+            ticker: state.ticker,
+            amount_usdc: quote.pay_usdc,
+          },
+        }),
       });
 
-      setState((s) => ({
-        ...s,
-        signing: false,
-        screen: 'success',
-        txDetails: {
-          ticker: s.ticker,
-          amount: s.amount,
-          floorProtection: s.floorProtection,
-          credentialId: assertion.credentialId,
-        },
-      }));
+      if (!submitRes.ok) {
+        const text = await submitRes.text().catch(() => '');
+        throw new Error(`Submit failed: ${submitRes.status} ${text}`);
+      }
+
+      const submitData = await submitRes.json() as { status_id: string; status: string };
+      const statusId = submitData.status_id;
+
+      setState((s) => ({ ...s, statusId, screen: 'signing' }));
+
+      // Also notify service worker for legacy compatibility
+      void browser.runtime.sendMessage({
+        type: 'SHEET_SIGNED',
+        ticker: state.ticker,
+        amount: (parseFloat(quote.pay_usdc) / 1_000_000).toString(),
+        signature: sigHex,
+        publicKey: credentialId,
+        credentialId,
+        floorProtection: false,
+        quoteId: quote.quote_id,
+      }).catch(() => {/* ignore - sheet handles submit directly */});
+
+      // Open SSE stream to track status
+      const eventSource = new EventSource(`${API_URL}/v1/status/${statusId}/stream`);
+
+      await new Promise<void>((resolve) => {
+        let resolved = false;
+        const done = (txHash: string | null = null) => {
+          if (!resolved) {
+            resolved = true;
+            eventSource.close();
+            setState((s) => ({
+              ...s,
+              signing: false,
+              screen: 'success',
+              txHash,
+            }));
+            resolve();
+          }
+        };
+
+        eventSource.addEventListener('status', (ev: MessageEvent<string>) => {
+          try {
+            const data = JSON.parse(ev.data) as { state: string; tx_hash?: string | null };
+            // Resolve to success on submitted/tracking/done — order is in the system
+            if (data.state === 'submitted' || data.state === 'tracking' || data.state === 'done') {
+              done(data.tx_hash ?? null);
+            } else if (data.state === 'failed') {
+              if (!resolved) {
+                resolved = true;
+                eventSource.close();
+                setState((s) => ({ ...s, signing: false, screen: 'error', errorMsg: 'Order failed' }));
+                resolve();
+              }
+            }
+          } catch {
+            // parse error — ignore
+          }
+        });
+
+        eventSource.onerror = () => {
+          // SSE error / server closed — submit already returned 202, treat as success
+          done(null);
+        };
+
+        // Safety timeout: if SSE never resolves in 8s, show success
+        setTimeout(() => done(null), 8_000);
+      });
     } catch (err) {
-      console.error('[floors] Sign failed:', err);
-      setState((s) => ({ ...s, signing: false }));
+      console.error('[floors] Confirm failed:', err);
+      const msg = err instanceof Error ? err.message : String(err);
+      setState((s) => ({ ...s, signing: false, screen: 'error', errorMsg: msg }));
     }
-  }, [state.ticker, state.amount, state.floorProtection]);
+  }, [state]);
+
+  const handleRetry = useCallback(() => {
+    setState((s) => ({ ...s, screen: 'buy', signing: false, statusId: null, txHash: null, errorMsg: null }));
+  }, []);
 
   const handleViewPortfolio = useCallback(() => {
     window.close();
@@ -538,19 +599,22 @@ function App() {
   return (
     <>
       {state.screen === 'buy' && (
-        <BuyScreen
-          state={state}
-          onAmountChange={handleAmountChange}
-          onToggleFloor={handleToggleFloor}
-          onConfirm={handleConfirm}
-          onBack={handleBack}
-        />
+        <BuyScreen state={state} onConfirm={handleConfirm} onBack={handleBack} />
       )}
-      {state.screen === 'success' && state.txDetails && (
+      {state.screen === 'signing' && (
+        <SigningScreen statusId={state.statusId} />
+      )}
+      {state.screen === 'success' && (
         <SuccessScreen
-          txDetails={state.txDetails}
+          ticker={state.ticker}
+          draftQuote={state.draftQuote}
+          statusId={state.statusId}
+          txHash={state.txHash}
           onViewPortfolio={handleViewPortfolio}
         />
+      )}
+      {state.screen === 'error' && (
+        <ErrorScreen message={state.errorMsg ?? 'Unknown error'} onRetry={handleRetry} />
       )}
     </>
   );
