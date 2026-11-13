@@ -1,7 +1,6 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { FloorApiError } from '@floors/shared-server';
-import type { FloorQuote } from '@floors/types';
 
 // ---------------------------------------------------------------------------
 // Shared 1Click config
@@ -109,15 +108,40 @@ const DraftQuoteQuerySchema = z.object({
 });
 
 // ---------------------------------------------------------------------------
-// Legacy /v1/quotes schema
+// Legacy /v1/quotes schema — updated with optional floor param
 // ---------------------------------------------------------------------------
 
 const QuoteRequestSchema = z.object({
   asset: z.string().min(1),
   qty: z.string().min(1),
-  floor_bps: z.number().int().min(1).max(10000),
-  duration_secs: z.number().int().positive(),
+  account_id: z.string().optional(),
+  draft: z.boolean().optional(),
+  floor: z.object({
+    bps: z.number().int().min(1).max(10000),
+    duration_secs: z.number().int().positive(),
+  }).optional(),
 });
+
+// ---------------------------------------------------------------------------
+// Risk engine response type
+// ---------------------------------------------------------------------------
+
+interface RiskFloorQuoteResponse {
+  v: string;
+  quote_id: string;
+  owner: string;
+  asset: string;
+  qty: string;
+  floor_bps: number;
+  duration_secs: number;
+  floor_price_e6: string;
+  fee_usdc: string;
+  sleeve: string;
+  expires_at: number;
+  expires_at_ns: string;
+  sig: string;
+  key_id: string;
+}
 
 function generateQuoteId(): string {
   const bytes = new Uint8Array(32);
@@ -129,7 +153,7 @@ function generateQuoteId(): string {
 // Route registration
 // ---------------------------------------------------------------------------
 
-export function registerQuoteRoutes(app: FastifyInstance): void {
+export function registerQuoteRoutes(app: FastifyInstance, riskUrl?: string): void {
   /**
    * GET /v1/quotes/draft
    *
@@ -162,9 +186,11 @@ export function registerQuoteRoutes(app: FastifyInstance): void {
       );
     }
 
-    // Amount in USDC micro-units (6 decimals)
-    const usdNum = parseFloat(usd);
-    const amountUsdc = (BigInt(Math.round(usdNum * 1_000_000))).toString();
+    // Amount in USDC micro-units (6 decimals) — bigint only, no floats
+    // usd is a whole-or-decimal string like "10" or "10.50"
+    const [wholePart = '0', fracPart = ''] = usd.split('.');
+    const fracPadded = fracPart.slice(0, 6).padEnd(6, '0');
+    const amountUsdc = (BigInt(wholePart) * 1_000_000n + BigInt(fracPadded)).toString();
     const cacheKey = `${asset}:${amountUsdc}`;
 
     // Check cache
@@ -202,7 +228,7 @@ export function registerQuoteRoutes(app: FastifyInstance): void {
     const fracStr = fracEth.toString().padStart(18, '0').slice(0, 6);
     const estAmount = `${wholeEth.toString()}.${fracStr}`;
 
-    const youPay = (usdNum).toFixed(2);
+    const youPay = usd;
 
     const result: CachedDraftQuote = {
       quote_id,
@@ -228,7 +254,10 @@ export function registerQuoteRoutes(app: FastifyInstance): void {
   });
 
   /**
-   * POST /v1/quotes  (legacy — kept for backwards compat, now uses real 1Click pricing)
+   * POST /v1/quotes
+   *
+   * When `floor` is present, calls the risk engine for a signed floor quote.
+   * Without `floor`, returns a basic quote (legacy behaviour).
    */
   app.post('/v1/quotes', async (request: FastifyRequest, reply: FastifyReply) => {
     const bodyResult = QuoteRequestSchema.safeParse(request.body);
@@ -242,10 +271,71 @@ export function registerQuoteRoutes(app: FastifyInstance): void {
       );
     }
 
-    const { asset, qty, floor_bps, duration_secs } = bodyResult.data;
+    const { asset, qty, account_id, floor } = bodyResult.data;
     const assetUpper = asset.toUpperCase();
 
-    const expiresAtNs = BigInt(Date.now() + duration_secs * 1000) * BigInt(1_000_000);
+    // ------------------------------------------------------------------
+    // Path A: floor param present — delegate to risk engine
+    // ------------------------------------------------------------------
+    if (floor !== undefined) {
+      const effectiveRiskUrl = riskUrl ?? 'http://localhost:3003';
+      const owner = account_id ?? 'anonymous.floors.near';
+
+      let riskResp: Response;
+      try {
+        riskResp = await fetch(`${effectiveRiskUrl}/internal/floor-quotes`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            asset: assetUpper,
+            qty,
+            floor_bps: floor.bps,
+            duration_secs: floor.duration_secs,
+            owner,
+          }),
+          signal: AbortSignal.timeout(10_000),
+        });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        request.log.error({ err: msg, asset: assetUpper, event: 'floor_quote_network_error' }, 'Risk engine unreachable');
+        throw new FloorApiError('FLOOR_QUOTE_UNAVAILABLE', 'Floor quote service is unavailable', true, 503);
+      }
+
+      if (!riskResp.ok) {
+        const body = await riskResp.text().catch(() => '');
+        request.log.error({ status: riskResp.status, body, asset: assetUpper, event: 'floor_quote_error' }, 'Risk engine returned error');
+        throw new FloorApiError('FLOOR_QUOTE_UNAVAILABLE', 'Floor quote service returned an error', true, 503);
+      }
+
+      const riskData = await riskResp.json() as RiskFloorQuoteResponse;
+
+      const expiresAt = new Date(Number(riskData.expires_at) * 1000).toISOString();
+
+      request.log.info({ asset: assetUpper, quote_id: riskData.quote_id, event: 'floor_quote_fetched' }, 'Floor quote from risk engine');
+
+      return reply.status(200).send({
+        quote_id: riskData.quote_id,
+        asset: riskData.asset,
+        qty: riskData.qty,
+        expires_at: expiresAt,
+        floor: {
+          quote_id: riskData.quote_id,
+          floor_price_e6: riskData.floor_price_e6,
+          fee_usdc: riskData.fee_usdc,
+          sleeve: riskData.sleeve,
+          sig: riskData.sig,
+          key_id: riskData.key_id,
+          expires_at_ns: riskData.expires_at_ns,
+          floor_bps: riskData.floor_bps,
+          duration_secs: riskData.duration_secs,
+        },
+      });
+    }
+
+    // ------------------------------------------------------------------
+    // Path B: no floor — legacy basic quote
+    // ------------------------------------------------------------------
+    const expiresAtNs = BigInt(Date.now() + 86400 * 1000) * BigInt(1_000_000);
 
     // Try to get real 1Click pricing; fall back to stub if unavailable
     let floor_price_e6 = '1000000'; // $1.00 stub fallback
@@ -265,7 +355,7 @@ export function registerQuoteRoutes(app: FastifyInstance): void {
           const ETH_DIVISOR = 10n ** ETH_DECIMALS;
           // price_e6 = 1e6 * 1e18 / amountOut  (USDC micro-units per token)
           floor_price_e6 = ((BigInt(1_000_000) * ETH_DIVISOR) / amountOut).toString();
-          fee_usdc = (BigInt(floor_price_e6) * BigInt(floor_bps) / BigInt(10_000) / BigInt(1_000_000)).toString();
+          fee_usdc = (BigInt(floor_price_e6) / BigInt(1_000_000)).toString();
           if (fee_usdc === '0') fee_usdc = '100';
         }
       } catch {
@@ -273,27 +363,18 @@ export function registerQuoteRoutes(app: FastifyInstance): void {
       }
     }
 
-    const quote: FloorQuote = {
-      v: 1,
-      id: generateQuoteId(),
-      owner: 'pending.floors.near',
-      asset: assetUpper,
+    const quoteId = generateQuoteId();
+
+    request.log.info({ asset: assetUpper, quote_id: quoteId }, 'basic_quote_generated');
+
+    return reply.status(200).send({
+      quote_id: quoteId,
+      asset,
       qty,
-      floor_bps,
-      duration_secs,
+      expires_at: new Date(Number(expiresAtNs / BigInt(1_000_000))).toISOString(),
       floor_price_e6,
       fee_usdc,
-      sleeve: 'stub_sleeve',
-      pyth_feed: '0x0000000000000000000000000000000000000000000000000000000000000000',
-      expires_at_ns: expiresAtNs.toString(),
-      key_id: 0,
-    };
-
-    const sig = 'stub_sig_' + quote.id.slice(0, 16);
-
-    request.log.info({ asset: assetUpper, quote_id: quote.id }, 'quote_generated');
-
-    return reply.status(200).send({ quote, sig });
+    });
   });
 }
 

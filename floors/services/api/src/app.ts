@@ -6,6 +6,9 @@ import { registerAccountRoutes } from './routes/accounts.js';
 import { registerQuoteRoutes } from './routes/quotes.js';
 import { registerBuyRoutes } from './routes/buy.js';
 import { registerSubmitRoutes } from './routes/submit.js';
+import { registerInviteRoutes } from './routes/invites.js';
+import { registerActionsRoutes } from './routes/actions.js';
+import { registerSuggestionsRoutes } from './routes/suggestions.js';
 
 export async function buildApp(
   config: ApiConfig & BaseConfig,
@@ -15,10 +18,13 @@ export async function buildApp(
   const app = await createApp(config, logger);
 
   // Register all routes
-  registerAccountRoutes(app, db);
-  registerQuoteRoutes(app);
+  registerAccountRoutes(app, db, config.RELAYER_URL);
+  registerInviteRoutes(app, db);
+  registerQuoteRoutes(app, config.RISK_URL);
   registerBuyRoutes(app, config.RELAYER_URL);
   registerSubmitRoutes(app, db, config.RELAYER_URL);
+  registerActionsRoutes(app, db, config.RELAYER_URL);
+  registerSuggestionsRoutes(app, db);
 
   return app;
 }

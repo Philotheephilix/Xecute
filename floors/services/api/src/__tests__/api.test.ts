@@ -119,44 +119,26 @@ describe('POST /v1/buy', () => {
 });
 
 describe('POST /v1/quotes', () => {
-  it('returns 200 with a quote when request is valid', async () => {
+  it('returns 200 with a quote when request is valid (no floor)', async () => {
     const response = await app.inject({
       method: 'POST',
       url: '/v1/quotes',
       payload: {
-        asset: 'eth.near',
+        asset: 'ETH',
         qty: '1000000000000000000',
-        floor_bps: 500,
-        duration_secs: 3600,
       },
     });
 
     expect(response.statusCode).toBe(200);
     const body = JSON.parse(response.body) as {
-      quote: { v: number; asset: string; id: string };
-      sig: string;
+      quote_id: string;
+      asset: string;
+      qty: string;
     };
-    expect(body.quote.v).toBe(1);
-    expect(body.quote.asset).toBe('eth.near');
-    expect(body.quote.id).toHaveLength(64);
-    expect(typeof body.sig).toBe('string');
-  });
-
-  it('returns 400 with VALIDATION_ERROR when floor_bps is too high', async () => {
-    const response = await app.inject({
-      method: 'POST',
-      url: '/v1/quotes',
-      payload: {
-        asset: 'eth.near',
-        qty: '100',
-        floor_bps: 99999,
-        duration_secs: 3600,
-      },
-    });
-
-    expect(response.statusCode).toBe(400);
-    const body = JSON.parse(response.body) as { error: { code: string } };
-    expect(body.error.code).toBe('VALIDATION_ERROR');
+    expect(typeof body.quote_id).toBe('string');
+    expect(body.quote_id.length).toBeGreaterThan(0);
+    expect(body.asset).toBe('ETH');
+    expect(body.qty).toBe('1000000000000000000');
   });
 
   it('returns 400 with VALIDATION_ERROR when asset is empty', async () => {
@@ -166,8 +148,22 @@ describe('POST /v1/quotes', () => {
       payload: {
         asset: '',
         qty: '100',
-        floor_bps: 500,
-        duration_secs: 3600,
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+    const body = JSON.parse(response.body) as { error: { code: string } };
+    expect(body.error.code).toBe('VALIDATION_ERROR');
+  });
+
+  it('returns 400 with VALIDATION_ERROR when floor.bps is too high', async () => {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/quotes',
+      payload: {
+        asset: 'ETH',
+        qty: '100',
+        floor: { bps: 99999, duration_secs: 3600 },
       },
     });
 
