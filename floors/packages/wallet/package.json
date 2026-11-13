@@ -9,6 +9,10 @@
     ".": {
       "import": "./dist/index.js",
       "types": "./dist/index.d.ts"
+    },
+    "./nep616": {
+      "import": "./dist/nep616.js",
+      "types": "./dist/nep616.d.ts"
     }
   },
   "scripts": {
@@ -23,6 +27,7 @@
     "js-sha3": "0.9.3"
   },
   "devDependencies": {
+    "@noble/curves": "1.9.1",
     "typescript": "5.7.3",
     "fast-check": "4.1.1",
     "vitest": "3.2.4"

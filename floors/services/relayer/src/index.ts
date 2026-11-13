@@ -12,6 +12,11 @@ const RelayerConfigSchema = BaseConfigSchema.extend({
   NEAR_NETWORK_ID: z.enum(['sandbox', 'testnet', 'mainnet']).default('sandbox'),
   NEAR_ACCOUNT_ID: z.string().default('alice.test.near'),
   NEAR_PRIVATE_KEY: z.string().default('ed25519:3D4YudUahN1nadPAuM6raWaNE9FKCaEBqbWJSFbEQ9JzqJKPQgDpXfBaKFEEBdMzCJwSDRnjCL5gKVzBMtnhXNi'),
+  // SHA-256 of the wallet-webauthn-p256 WASM (wallet-contracts-v0.2.0, ADR-0003)
+  WALLET_CONTRACT_CODE_HASH: z
+    .string()
+    .regex(/^[0-9a-f]{64}$/, 'must be 64 hex chars')
+    .default('7c2023ca3e3c53bf2309f9654180c8c516fb36cce5a18da8577e83c8f63ffd6b'),
 });
 
 export type RelayerConfig = z.infer<typeof RelayerConfigSchema>;

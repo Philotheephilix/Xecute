@@ -17,6 +17,7 @@
   "dependencies": {
     "@floors/shared-server": "workspace:*",
     "@floors/types": "workspace:*",
+    "@floors/wallet": "workspace:*",
     "fastify": "5.3.3",
     "postgres": "3.4.5",
     "zod": "3.25.67",
