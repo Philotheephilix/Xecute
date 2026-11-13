@@ -551,13 +551,13 @@ impl Contract {
 
     fn finalize_expire_state(
         &mut self,
-        floor_id: u64,
+        _floor_id: u64,
         qty: u128,
         reserved_usdc: u128,
         asset: &str,
         sleeve_id: &str,
     ) {
-        self.finalize_close_state(floor_id, qty, reserved_usdc, asset, sleeve_id);
+        self.finalize_close_state(_floor_id, qty, reserved_usdc, asset, sleeve_id);
     }
 
     fn reverse_close_state(

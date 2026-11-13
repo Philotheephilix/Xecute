@@ -1,4 +1,4 @@
-use crate::state::{Floor, FloorStatus, Params, Sleeve, Totals};
+use crate::state::{Floor, FloorStatus, Params, Totals};
 use crate::{Contract, ContractExt};
 use near_sdk::{near, AccountId};
 use serde::{Deserialize, Serialize};
@@ -38,6 +38,8 @@ impl FloorView {
             status: match floor.status {
                 FloorStatus::Active => "Active".to_string(),
                 FloorStatus::PayoutPending => "PayoutPending".to_string(),
+                FloorStatus::ClosePending => "ClosePending".to_string(),
+                FloorStatus::ExpirePending => "ExpirePending".to_string(),
                 FloorStatus::Closed => "Closed".to_string(),
                 FloorStatus::Sold => "Sold".to_string(),
                 FloorStatus::Expired => "Expired".to_string(),
