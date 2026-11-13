@@ -55,7 +55,7 @@ export default function SetupDefaults({ navigate, className }: Props) {
       'floors:floor_defaults',
       JSON.stringify({ bps: selectedBps, duration_secs: selectedDuration }),
     );
-    navigate('fund');
+    navigate('enable-trading');
   };
 
   const costPct = estimateCostPct(selectedBps, selectedDuration);
@@ -65,7 +65,7 @@ export default function SetupDefaults({ navigate, className }: Props) {
       {/* Header row */}
       <div className="px-[18px] pt-14 flex items-center gap-3">
         <button
-          onClick={() => navigate('enable-trading')}
+          onClick={() => navigate('account-ready')}
           className="w-11 h-11 bg-white border-2 border-[#111] rounded-[13px] shadow-neo-sm shadow-neo-active flex items-center justify-center shrink-0"
           aria-label="Go back"
         >
@@ -151,7 +151,7 @@ export default function SetupDefaults({ navigate, className }: Props) {
             Save &amp; Continue
           </button>
           <button
-            onClick={() => navigate('fund')}
+            onClick={() => navigate('enable-trading')}
             className="w-full h-14 bg-white text-[#111] border-2 border-[#111] rounded-[13px] text-base font-extrabold shadow-neo-sm shadow-neo-active"
           >
             Skip for now

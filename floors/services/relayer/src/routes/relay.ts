@@ -1,4 +1,4 @@
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { FloorApiError } from '@floors/shared-server';
 import { connect, keyStores, KeyPair } from 'near-api-js';
@@ -446,6 +446,35 @@ export function registerRelayRoutes(
 
   // ---- Floor lifecycle bot endpoints ----
 
+  // ---------------------------------------------------------------------------
+  // Bot authentication
+  // Reads INTERNAL_SECRET once at route-registration time.
+  // If set, every bot endpoint requires:  Authorization: Bearer <secret>
+  // If unset, a warning is logged at startup and requests are allowed through
+  // (dev/sandbox mode).
+  // ---------------------------------------------------------------------------
+
+  const internalSecret = process.env['INTERNAL_SECRET'] ?? '';
+
+  if (!internalSecret) {
+    logger.warn(
+      { event: 'bot_auth_disabled' },
+      'INTERNAL_SECRET is not set — bot endpoints are unauthenticated (dev mode)',
+    );
+  }
+
+  /**
+   * Throws a 401 FloorApiError when INTERNAL_SECRET is configured and the
+   * request does not carry a matching `Authorization: Bearer <secret>` header.
+   */
+  function assertBotAuth(request: FastifyRequest): void {
+    if (!internalSecret) return; // dev mode — no auth required
+    const authHeader = request.headers['authorization'] ?? '';
+    if (authHeader !== `Bearer ${internalSecret}`) {
+      throw new FloorApiError('UNAUTHORIZED', 'Missing or invalid Authorization header', false, 401);
+    }
+  }
+
   /**
    * In-memory nonce store for floor-action replay protection.
    * Maps nonce string → true. TTL handled by valid_until_ns check.
@@ -485,6 +514,8 @@ export function registerRelayRoutes(
   });
 
   app.post('/v1/relay/floor-action', async (request, reply) => {
+    assertBotAuth(request);
+
     const bodyResult = FloorActionBodySchema.safeParse(request.body);
     if (!bodyResult.success) {
       throw new FloorApiError('VALIDATION_ERROR', 'Invalid floor-action request', false, 400, { issues: bodyResult.error.issues });
@@ -613,6 +644,8 @@ export function registerRelayRoutes(
   });
 
   app.post('/v1/relay/reconcile', async (request, reply) => {
+    assertBotAuth(request);
+
     const bodyResult = ReconcileBodySchema.safeParse(request.body);
     if (!bodyResult.success) {
       throw new FloorApiError('VALIDATION_ERROR', 'Invalid reconcile request', false, 400, { issues: bodyResult.error.issues });
@@ -654,6 +687,8 @@ export function registerRelayRoutes(
   });
 
   app.post('/v1/relay/auto-protect', async (request, reply) => {
+    assertBotAuth(request);
+
     const bodyResult = AutoProtectBodySchema.safeParse(request.body);
     if (!bodyResult.success) {
       throw new FloorApiError('VALIDATION_ERROR', 'Invalid auto-protect request', false, 400, { issues: bodyResult.error.issues });
@@ -698,6 +733,8 @@ export function registerRelayRoutes(
   });
 
   app.post('/v1/relay/unwind-start', async (request, reply) => {
+    assertBotAuth(request);
+
     const bodyResult = UnwindStartBodySchema.safeParse(request.body);
     if (!bodyResult.success) {
       throw new FloorApiError('VALIDATION_ERROR', 'Invalid unwind-start request', false, 400, { issues: bodyResult.error.issues });
@@ -744,6 +781,8 @@ export function registerRelayRoutes(
   });
 
   app.post('/v1/relay/unwind-settle', async (request, reply) => {
+    assertBotAuth(request);
+
     const bodyResult = UnwindSettleBodySchema.safeParse(request.body);
     if (!bodyResult.success) {
       throw new FloorApiError('VALIDATION_ERROR', 'Invalid unwind-settle request', false, 400, { issues: bodyResult.error.issues });

@@ -46,22 +46,29 @@ export default function Portfolio({ navigate, account, className }: Props) {
   const [positions, setPositions] = useState<Position[]>([]);
   // H1: near_balance from API response (not hardcoded)
   const [balance, setBalance] = useState<string | null>(null);
+  const [loadingBalance, setLoadingBalance] = useState(true);
   const [loadingPositions, setLoadingPositions] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     setLoadingPositions(true);
+    setLoadingBalance(true);
     getPositions(accountId)
       .then(({ positions: pos, near_balance }) => {
         if (!cancelled) {
           setPositions(pos);
           // H1: use near_balance from API response
           setBalance(near_balance);
+          setLoadingBalance(false);
         }
       })
       .catch(() => {
-        if (!cancelled) setPositions([]);
+        if (!cancelled) {
+          setPositions([]);
+          setBalance(null);
+          setLoadingBalance(false);
+        }
       })
       .finally(() => {
         if (!cancelled) setLoadingPositions(false);
@@ -103,9 +110,11 @@ export default function Portfolio({ navigate, account, className }: Props) {
       });
 
       // Refresh positions after action
+      setLoadingBalance(true);
       const { positions: updated, near_balance } = await getPositions(accountId);
       setPositions(updated);
       setBalance(near_balance);
+      setLoadingBalance(false);
     } catch (err) {
       console.error('[floors] action failed:', err);
     } finally {
@@ -162,7 +171,7 @@ export default function Portfolio({ navigate, account, className }: Props) {
         <div className="bg-white border-2 border-[#111] rounded-[18px] shadow-neo p-5">
           <p className="text-xs font-extrabold text-gray-500 mb-1">TOTAL BALANCE</p>
           <p className="text-4xl font-extrabold text-[#111]">
-            {balance ?? (loadingPositions ? 'Loading…' : '0.00 NEAR')}
+            {loadingBalance ? 'Loading…' : (balance ?? '—')}
           </p>
           <p className="text-sm font-semibold text-gray-400 mt-0.5">≈ $0.00 USD</p>
         </div>

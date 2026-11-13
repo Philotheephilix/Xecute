@@ -36,8 +36,8 @@ const SCREEN_ORDER: Screen[] = [
   'create-passkey',
   'creating-account',
   'account-ready',
-  'enable-trading',
   'setup-defaults',
+  'enable-trading',
   'fund',
   'portfolio',
 ];

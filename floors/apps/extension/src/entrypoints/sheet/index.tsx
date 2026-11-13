@@ -47,6 +47,8 @@ interface DraftQuote {
 interface SheetState {
   ticker: string;
   postId: string | undefined;
+  /** Floors account ID — read from localStorage key floors:account_id */
+  accountId: string;
   screen: Screen;
   signing: boolean;
   statusId: string | null;
@@ -69,6 +71,16 @@ function getParams(): { ticker: string; postId: string | undefined } {
   const ticker = params.get('ticker') ?? 'ETH';
   const postId = params.get('postId') ?? undefined;
   return { ticker, postId };
+}
+
+// ── Helpers ─ hex ─────────────────────────────────────────────────────────────
+
+function hexToBytes(hex: string): Uint8Array {
+  const bytes = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < bytes.length; i++) {
+    bytes[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+  }
+  return bytes;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -831,9 +843,19 @@ function App() {
     return { bps: 0, duration_secs: 2592000 };
   })();
 
+  // Read floors account ID from localStorage (written by web app during account creation)
+  const savedAccountId: string = (() => {
+    try {
+      return localStorage.getItem('floors:account_id') ?? '';
+    } catch {
+      return '';
+    }
+  })();
+
   const [state, setState] = useState<SheetState>({
     ticker,
     postId,
+    accountId: savedAccountId,
     screen: 'buy',
     signing: false,
     statusId: null,
@@ -1132,25 +1154,83 @@ function App() {
   }, []);
 
   const handleSellBack = useCallback(async () => {
-    // H5: sell the partially-received tokens back to USDC via POST /v1/sell
-    const { draftQuote: quote } = state;
+    // H5: sell the partially-received tokens back to USDC.
+    // XECUTE-109: 3-step signed action flow (challenge → sign → submit).
+    // XECUTE-110: WYSIWYS — verifyAgainstSheet before signWithPasskey.
+    const { draftQuote: quote, accountId, partialActualQty } = state;
     if (!quote) return;
 
     setState((s) => ({ ...s, signing: true }));
 
     try {
-      const sellRes = await fetch(`${API_URL}/v1/sell`, {
+      // WYSIWYS: verify the sell-back payload matches what the partial screen shows.
+      // The sell-back is a TokenDiff with a negative asset amount (selling back).
+      const sellQty = partialActualQty ?? quote.est_qty;
+      const sellIntentMessage = JSON.stringify([
+        {
+          type: 'TokenDiff',
+          diff: {
+            [quote.asset]: `-${sellQty}`,
+            'usdc.near': sellQty,
+          },
+        },
+      ]);
+      const sellIntentPayload: IntentPayload = {
+        message: sellIntentMessage,
+        nonce: crypto.getRandomValues(new Uint8Array(32)),
+        recipient: 'intents.near',
+      };
+      const mismatches = verifyAgainstSheet(sellIntentPayload, {
+        asset: quote.asset,
+        qty: `-${sellQty}`,
+      });
+      if (mismatches.length > 0) {
+        throw new Error(`Payload mismatch: do not sign. ${mismatches.join('; ')}`);
+      }
+
+      // Step 1: get challenge from API
+      const challengeRes = await fetch(
+        `${API_URL}/v1/accounts/${encodeURIComponent(accountId)}/actions`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'sell_to_floor', floor_id: quote.quote_id }),
+        },
+      );
+      if (!challengeRes.ok) {
+        const text = await challengeRes.text().catch(() => '');
+        throw new Error(`Action challenge failed: ${challengeRes.status} ${text}`);
+      }
+      const { wallet_request, challenge } = await challengeRes.json() as {
+        wallet_request: unknown;
+        challenge: string;
+      };
+
+      // Step 2: sign challenge with passkey
+      const challengeBytes = hexToBytes(challenge);
+      const assertion = await signWithPasskey(challengeBytes);
+      const sigHex = Array.from(assertion.signature)
+        .map((b) => b.toString(16).padStart(2, '0'))
+        .join('');
+      const credentialId = assertion.credentialId;
+
+      // Step 3: submit with assertion
+      const submitRes = await fetch(`${API_URL}/v1/actions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          action: 'sell_to_floor',
           floor_id: quote.quote_id,
-          account_id: '',
+          account_id: accountId,
+          signature: sigHex,
+          credential_id: credentialId,
+          wallet_request,
         }),
       });
 
-      if (!sellRes.ok) {
-        const text = await sellRes.text().catch(() => '');
-        throw new Error(`Sell failed: ${sellRes.status} ${text}`);
+      if (!submitRes.ok) {
+        const text = await submitRes.text().catch(() => '');
+        throw new Error(`Sell-back submit failed: ${submitRes.status} ${text}`);
       }
 
       setState((s) => ({

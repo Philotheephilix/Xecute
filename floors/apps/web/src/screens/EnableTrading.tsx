@@ -35,9 +35,9 @@ export default function EnableTrading({ navigate, account, className }: Props) {
       const requestResult = await getEnableTradingRequest(accountId);
 
       if (requestResult === null) {
-        // Endpoint not implemented yet — skip to SetupDefaults
+        // Endpoint not implemented yet — skip to fund
         console.warn('[floors] enable-trading-request not available, skipping step');
-        navigate('setup-defaults');
+        navigate('fund');
         return;
       }
 
@@ -71,7 +71,7 @@ export default function EnableTrading({ navigate, account, className }: Props) {
 
       // Brief pause so user can see the success state, then navigate
       await new Promise<void>((r) => setTimeout(r, 600));
-      navigate('setup-defaults');
+      navigate('fund');
     } catch (err) {
       console.error('[floors] enable-trading error:', err);
       setError(err instanceof Error ? err.message : 'Enable trading failed');
@@ -80,7 +80,7 @@ export default function EnableTrading({ navigate, account, className }: Props) {
   };
 
   const handleSkip = () => {
-    navigate('setup-defaults');
+    navigate('fund');
   };
 
   const isLoading = phase === 'requesting' || phase === 'signing' || phase === 'submitting';
@@ -100,7 +100,7 @@ export default function EnableTrading({ navigate, account, className }: Props) {
         {/* Header */}
         <div className="flex items-center gap-4 mb-8">
           <button
-            onClick={() => navigate('account-ready')}
+            onClick={() => navigate('setup-defaults')}
             className="w-11 h-11 bg-white border-2 border-[#111] rounded-[13px] shadow-neo-sm shadow-neo-active flex items-center justify-center"
             aria-label="Go back"
           >

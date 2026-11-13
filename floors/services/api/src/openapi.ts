@@ -11,8 +11,8 @@ const CreateAccountBodySchema = z.object({
 const QuoteRequestSchema = z.object({
   asset: z.string().min(1),
   qty: z.string().min(1),
-  floor_bps: z.number().int().min(1).max(10000),
-  duration_secs: z.number().int().positive(),
+  floor_bps: z.number().int().min(100).max(5000),
+  duration_secs: z.number().int().min(86400).max(31536000),
 });
 
 const BuyBodySchema = z.object({

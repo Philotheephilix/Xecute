@@ -51,6 +51,12 @@ const QuoteRequestSchema = z.object({
   duration_secs: z.number().int().min(86_400).max(31_536_000),
   /** NEAR account ID of the floor buyer */
   owner: z.string().min(2).max(64),
+  /**
+   * Request expiry as Unix nanoseconds (BigInt string).
+   * Prevents replayed or stale quote requests from generating a fresh quote.
+   * Must be in the future at the time the request is received.
+   */
+  valid_until_ns: z.string().regex(/^\d+$/, 'valid_until_ns must be a non-negative integer string'),
 });
 
 type QuoteRequest = z.infer<typeof QuoteRequestSchema>;
@@ -158,7 +164,14 @@ export function registerRiskQuoteRoutes(app: FastifyInstance): void {
       });
     }
 
-    const { asset, qty, floor_bps, duration_secs, owner } = bodyResult.data as QuoteRequest;
+    const { asset, qty, floor_bps, duration_secs, owner, valid_until_ns } = bodyResult.data as QuoteRequest;
+
+    // -----------------------------------------------------------------------
+    // 0. Expiry check: valid_until_ns is nanoseconds; Date.now() is milliseconds
+    // -----------------------------------------------------------------------
+    if (BigInt(valid_until_ns) / 1_000_000n < BigInt(Date.now())) {
+      throw new FloorApiError('QUOTE_EXPIRED', 'Quote request has expired (valid_until_ns is in the past)', false, 400);
+    }
 
     // -----------------------------------------------------------------------
     // 1. Fetch spot price from Pyth
