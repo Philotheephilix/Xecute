@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import Welcome from './screens/Welcome';
 import InviteCode from './screens/InviteCode';
 import CreatePasskey from './screens/CreatePasskey';
@@ -57,7 +57,7 @@ export default function App() {
   const isTransitioning = useRef(false);
   const pendingNavigate = useRef<Screen | null>(null);
 
-  const navigate = (to: Screen) => {
+  const navigate = useCallback((to: Screen) => {
     if (isTransitioning.current) {
       pendingNavigate.current = to;
       return;
@@ -104,7 +104,10 @@ export default function App() {
         });
       });
     });
-  };
+  // navigate reads screens only through setScreens functional-update form (prev => ...)
+  // and requestAnimationFrame, so it does not capture stale screens state.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Clean up exited screens after transition; flush any queued navigation
   useEffect(() => {
@@ -123,8 +126,7 @@ export default function App() {
       }
     }, 450);
     return () => clearTimeout(timer);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [screens]);
+  }, [screens, navigate]);
 
   const renderScreen = (s: ScreenState) => {
     const props = {

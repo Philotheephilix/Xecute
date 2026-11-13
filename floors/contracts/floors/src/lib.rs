@@ -737,6 +737,7 @@ mod tests {
                 min_usdc_out: 950_000,
                 started_ns: i * 1_000_000,
                 status: crate::state::UnwindStatus::Pending,
+                pre_balance_e6: 0,
             });
         }
         let page = contract.get_unwinds(Some(1), Some(2));

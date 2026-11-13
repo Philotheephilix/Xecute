@@ -11,7 +11,7 @@ interface Props {
   className: string;
 }
 
-type Phase = 'idle' | 'requesting' | 'signing' | 'submitting' | 'done' | 'error';
+type Phase = 'idle' | 'requesting' | 'signing' | 'submitting' | 'skipping' | 'done' | 'error';
 
 export default function EnableTrading({ navigate, account, className }: Props) {
   const [phase, setPhase] = useState<Phase>('idle');
@@ -35,8 +35,10 @@ export default function EnableTrading({ navigate, account, className }: Props) {
       const requestResult = await getEnableTradingRequest(accountId);
 
       if (requestResult === null) {
-        // Endpoint not implemented yet — skip to fund
+        // Endpoint not implemented yet — show brief feedback then continue
         console.warn('[floors] enable-trading-request not available, skipping step');
+        setPhase('skipping');
+        await new Promise<void>((r) => setTimeout(r, 800));
         navigate('fund');
         return;
       }
@@ -83,13 +85,14 @@ export default function EnableTrading({ navigate, account, className }: Props) {
     navigate('fund');
   };
 
-  const isLoading = phase === 'requesting' || phase === 'signing' || phase === 'submitting';
+  const isLoading = phase === 'requesting' || phase === 'signing' || phase === 'submitting' || phase === 'skipping';
 
   const phaseLabel: Record<Phase, string> = {
     idle: 'Enable Trading (one tap)',
     requesting: 'Preparing…',
     signing: 'Waiting for fingerprint…',
     submitting: 'Registering on NEAR…',
+    skipping: 'Setup not available, continuing…',
     done: 'Trading enabled!',
     error: 'Try again',
   };
@@ -158,6 +161,14 @@ export default function EnableTrading({ navigate, account, className }: Props) {
             </div>
           ))}
         </div>
+
+        {/* H8: Skipping notice — shown briefly when endpoint is unavailable */}
+        {phase === 'skipping' && (
+          <div className="mb-6 p-4 bg-white border-2 border-[#111] rounded-[18px] shadow-neo-sm flex items-center gap-3">
+            <span className="w-5 h-5 border-2 border-[#111] border-t-transparent rounded-full animate-spin shrink-0" />
+            <p className="text-sm font-bold text-[#111]">Setup not available, continuing…</p>
+          </div>
+        )}
 
         {/* Error card */}
         {error !== null && (

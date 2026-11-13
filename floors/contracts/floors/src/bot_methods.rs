@@ -1,4 +1,4 @@
-use crate::floors::ext_intents;
+use crate::floors::{ext_floors_self, ext_intents};
 use crate::receivers::{ext_pyth, PythPrice};
 use crate::state::{FloorStatus, Totals, Unwind, UnwindStatus};
 use crate::{Contract, ContractExt};
@@ -16,6 +16,7 @@ const GAS_CB: Gas = Gas::from_tgas(30);
 pub trait BotSelf {
     fn on_auto_protect(&mut self, floor_id: u64);
     fn on_reconcile(&mut self, asset: String, held: U128);
+    fn on_unwind_pre_balance(&mut self, unwind_id: u64);
     fn on_unwind_start_transfer(&mut self, unwind_id: u64);
     fn on_unwind_settle(&mut self, unwind_id: u64, proceeds: U128);
 }
@@ -81,7 +82,7 @@ impl Contract {
 
     /// Callback: check price and execute sell if below floor.
     #[private]
-    pub fn on_auto_protect(&mut self, floor_id: u64) {
+    pub fn on_auto_protect(&mut self, floor_id: u64) -> Option<Promise> {
         let price_opt: Option<PythPrice> =
             match env::promise_result_checked(0, usize::MAX) {
                 Ok(bytes) => serde_json::from_slice(&bytes).ok().flatten(),
@@ -96,20 +97,20 @@ impl Contract {
 
         let floor = match self.floors.get(&floor_id) {
             Some(f) => f.clone(),
-            None => return,
+            None => return None,
         };
 
         if floor.status != FloorStatus::Active {
-            return;
+            return None;
         }
 
         // Only sell if current price <= floor_price_e6
         if price_e6 > floor.floor_price_e6 {
-            return;
+            return None;
         }
 
-        // Execute the sell logic (mirrors sell_to_floor internals but emits by="auto_protect")
-        self.execute_floor_sell(floor_id, "auto_protect");
+        // Execute the sell: initiate async transfer + callback for payout
+        Some(self.execute_floor_sell(floor_id))
     }
 
     // -----------------------------------------------------------------------
@@ -230,6 +231,7 @@ impl Contract {
             min_usdc_out: min_usdc,
             started_ns: env::block_timestamp(),
             status: UnwindStatus::Pending,
+            pre_balance_e6: 0, // populated in on_unwind_pre_balance after querying deposit_account
         };
         self.unwinds.insert(unwind_id, unwind);
 
@@ -241,14 +243,55 @@ impl Contract {
             min_usdc_out: min_usdc.to_string(),
         });
 
+        // Step 1: query USDC balance of deposit_account BEFORE the transfer so
+        // on_unwind_settle can compute proceeds as a delta (avoids crediting any
+        // pre-existing USDC already sitting in deposit_account).
+        let intents = self.params.intents.clone();
+        let usdc_id = self.params.usdc.clone();
+        ext_intents::ext(intents.clone())
+            .with_static_gas(GAS_CALL)
+            .mt_balance_of(deposit_account.clone(), usdc_id)
+            .then(
+                ext_bot_self::ext(env::current_account_id())
+                    .with_static_gas(GAS_CB)
+                    .on_unwind_pre_balance(unwind_id),
+            )
+    }
+
+    /// Callback after querying the USDC pre-balance of deposit_account.
+    /// Stores the pre-balance in the Unwind record, then fires the token transfer.
+    #[private]
+    pub fn on_unwind_pre_balance(&mut self, unwind_id: u64) -> Promise {
+        let pre_balance: U128 = match env::promise_result_checked(0, usize::MAX) {
+            Ok(bytes) => serde_json::from_slice(&bytes)
+                .unwrap_or_else(|_| env::panic_str("E_DECODE: bad mt_balance_of result")),
+            Err(_) => env::panic_str("E_INTENTS_FAILED: pre-balance query failed"),
+        };
+
+        // Store the pre-balance so on_unwind_settle can compute the delta.
+        {
+            let u = self
+                .unwinds
+                .get_mut(&unwind_id)
+                .unwrap_or_else(|| env::panic_str("E_NOT_FOUND: unwind not found"));
+            u.pre_balance_e6 = pre_balance.0;
+        }
+
+        let unwind = self
+            .unwinds
+            .get(&unwind_id)
+            .unwrap()
+            .clone();
+
+        // Step 2: transfer the asset tokens to deposit_account.
         let intents = self.params.intents.clone();
         ext_intents::ext(intents)
             .with_attached_deposit(NearToken::from_yoctonear(1))
             .with_static_gas(GAS_CALL)
             .mt_transfer(
-                deposit_account,
-                asset,
-                qty,
+                unwind.deposit_account.clone(),
+                unwind.asset.clone(),
+                U128(unwind.qty),
                 None,
                 Some("unwind".to_string()),
             )
@@ -328,17 +371,20 @@ impl Contract {
     /// Callback for unwind_settle: update accounting based on actual USDC balance.
     #[private]
     pub fn on_unwind_settle(&mut self, unwind_id: u64, _proceeds_hint: U128) {
-        let proceeds_raw: U128 = match env::promise_result_checked(0, usize::MAX) {
+        let current_balance_raw: U128 = match env::promise_result_checked(0, usize::MAX) {
             Ok(bytes) => serde_json::from_slice(&bytes)
                 .unwrap_or_else(|_| env::panic_str("E_DECODE: bad mt_balance_of result")),
             Err(_) => env::panic_str("E_INTENTS_FAILED: mt_balance_of call failed"),
         };
-        let proceeds = proceeds_raw.0;
 
         let unwind = match self.unwinds.get(&unwind_id) {
             Some(u) => u.clone(),
             None => return,
         };
+
+        // Compute proceeds as the delta: current balance minus pre-existing balance.
+        // This avoids overcounting USDC that was already in deposit_account before the swap.
+        let proceeds = current_balance_raw.0.saturating_sub(unwind.pre_balance_e6);
 
         if unwind.status != UnwindStatus::Pending {
             return;
@@ -399,19 +445,23 @@ impl Contract {
 
 impl Contract {
     /// Execute the sell logic for a floor (used by auto_protect callback).
-    /// Mirrors sell_to_floor but accepts a `by` label for the event.
-    pub(crate) fn execute_floor_sell(&mut self, floor_id: u64, by: &str) {
+    /// Mirrors sell_to_floor: transitions to PayoutPending, then fires mt_transfer,
+    /// with on_auto_protect_sell_payout as the success/failure callback.
+    pub(crate) fn execute_floor_sell(&mut self, floor_id: u64) -> Promise {
         use crate::receivers::floor_div_u128;
 
-        let floor = match self.floors.get(&floor_id) {
-            Some(f) => f.clone(),
-            None => return,
-        };
+        let floor = self
+            .floors
+            .get(&floor_id)
+            .unwrap_or_else(|| env::panic_str("E_FLOOR_NOT_FOUND"))
+            .clone();
 
-        let asset_config = match self.params.assets.get(&floor.asset) {
-            Some(c) => c.clone(),
-            None => return,
-        };
+        let asset_config = self
+            .params
+            .assets
+            .get(&floor.asset)
+            .unwrap_or_else(|| env::panic_str("E_ASSET_NOT_FOUND"))
+            .clone();
 
         let decimals_pow = 10u128.pow(u32::from(asset_config.decimals));
         let payout_usdc = floor_div_u128(floor.qty, floor.floor_price_e6, decimals_pow);
@@ -419,64 +469,53 @@ impl Contract {
         let reserved_usdc = floor.reserved_usdc;
         let qty = floor.qty;
         let usdc_id = self.params.usdc.clone();
+        let owner = floor.owner.clone();
 
-        // Transition floor to Sold
+        // Transition floor to PayoutPending (reentrancy guard)
         {
             let floor_mut = self.floors.get_mut(&floor_id).unwrap();
-            floor_mut.status = FloorStatus::Sold;
-            floor_mut.qty = 0;
+            floor_mut.status = FloorStatus::PayoutPending;
         }
 
-        // Update USDC totals: reserved → (deduct)
+        // Update USDC totals: reserved → pending
         {
             let t = self
                 .totals
                 .entry(usdc_id.clone())
                 .or_insert_with(Totals::default);
             t.reserved = t.reserved.saturating_sub(reserved_usdc);
-            t.held = t.held.saturating_sub(payout_usdc);
-            // surplus back to free
-            let surplus = reserved_usdc.saturating_sub(payout_usdc);
-            t.free += surplus;
+            t.pending += payout_usdc;
         }
 
-        // Update asset totals: escrow → delivered
-        {
-            let t = self
-                .totals
-                .entry(floor.asset.clone())
-                .or_insert_with(Totals::default);
-            t.escrow = t.escrow.saturating_sub(qty);
-            t.delivered += qty;
-        }
-
-        // Release sleeve reservation
+        // Release sleeve reservation (surplus stays in reserved until callback confirms)
         {
             if let Some(sleeve) = self.sleeves.get_mut(&floor.sleeve) {
                 sleeve.reserved_usdc = sleeve.reserved_usdc.saturating_sub(reserved_usdc);
-                let surplus = reserved_usdc.saturating_sub(payout_usdc);
-                sleeve.free_usdc += surplus;
-                let delivered = sleeve.delivered.entry(floor.asset.clone()).or_insert(0);
-                *delivered += qty;
             }
         }
 
-        crate::events::emit_floor_sold(&crate::events::FloorSoldEvent {
-            floor_id,
-            owner: floor.owner.to_string(),
-            qty: qty.to_string(),
-            paid_usdc: payout_usdc.to_string(),
-            by: by.to_string(),
-        });
+        crate::events::emit_floor_payout_pending(
+            &crate::events::FloorPayoutPendingEvent { floor_id }
+        );
 
-        // Invariant checks: ensure accounting remained solvent after the sell.
-        if let Some(t) = self.totals.get(&floor.asset) {
-            t.assert_solvent(&floor.asset);
-        }
-        let usdc_id = self.params.usdc.clone();
-        if let Some(t) = self.totals.get(&usdc_id) {
-            t.assert_usdc_solvent();
-        }
+        let intents_contract = self.params.intents.clone();
+        let gas_transfer = GAS_CALL;
+        let gas_cb = GAS_CB;
+
+        ext_intents::ext(intents_contract)
+            .with_attached_deposit(NearToken::from_yoctonear(1))
+            .with_static_gas(gas_transfer)
+            .mt_transfer(owner, usdc_id, U128(payout_usdc), None, Some("auto_protect payout".to_string()))
+            .then(
+                ext_floors_self::ext(env::current_account_id())
+                    .with_static_gas(gas_cb)
+                    .on_auto_protect_sell_payout(
+                        floor_id,
+                        U128(payout_usdc),
+                        U128(qty),
+                        U128(reserved_usdc),
+                    ),
+            )
     }
 }
 
@@ -699,6 +738,7 @@ mod tests {
                 min_usdc_out: 400,
                 started_ns: 0,
                 status: UnwindStatus::Pending,
+                pre_balance_e6: 0,
             },
         );
 

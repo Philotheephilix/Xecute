@@ -37,6 +37,8 @@ interface Reservation {
   notional_e6: bigint;
   /** unix timestamp ms when this reservation expires */
   expiresAt: number;
+  /** NEAR account ID of the floor buyer, if provided */
+  account_id?: string;
 }
 
 // Active reservations
@@ -45,9 +47,15 @@ const reservations = new Map<string, Reservation>();
 /** Purge expired reservations (called before every capacity check). */
 function purgeExpired(): void {
   const now = Date.now();
-  for (const [id, r] of reservations) {
-    if (r.expiresAt <= now) {
+  for (const [id, res] of reservations) {
+    if (res.expiresAt <= now) {
       reservations.delete(id);
+      if (res.account_id !== undefined) {
+        const current = accountNotional.get(res.account_id) ?? 0n;
+        const next = current - res.notional_e6;
+        if (next <= 0n) accountNotional.delete(res.account_id);
+        else accountNotional.set(res.account_id, next);
+      }
     }
   }
 }
@@ -107,6 +115,7 @@ export function reserveCapacity(
     asset,
     notional_e6,
     expiresAt: Date.now() + ttlMs,
+    ...(account_id !== undefined ? { account_id } : {}),
   });
 
   if (account_id !== undefined) {

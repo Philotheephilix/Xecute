@@ -42,13 +42,18 @@ function BadgeStatus({ status }: { status: Position['status'] }) {
 }
 
 export default function Portfolio({ navigate, account, className }: Props) {
-  const accountId = account?.accountId ?? '0sabc123def456';
+  useEffect(() => {
+    if (!account) navigate('welcome');
+  }, [account, navigate]);
+
+  const accountId = account?.accountId ?? '';
   const [positions, setPositions] = useState<Position[]>([]);
   // H1: near_balance from API response (not hardcoded)
   const [balance, setBalance] = useState<string | null>(null);
   const [loadingBalance, setLoadingBalance] = useState(true);
   const [loadingPositions, setLoadingPositions] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -117,22 +122,26 @@ export default function Portfolio({ navigate, account, className }: Props) {
       setLoadingBalance(false);
     } catch (err) {
       console.error('[floors] action failed:', err);
+      setActionError(err instanceof Error ? err.message : 'Action failed');
     } finally {
       setActionLoading(null);
     }
   };
 
+  // While navigating away (account cleared), render nothing
+  if (!account) return null;
+
   return (
     <div className={className}>
       {/* Top hero section */}
-      <div className="relative w-full bg-[#FDE69E] pt-4 pb-6 overflow-hidden border-b-2 border-[#111]">
+      <div className="relative w-full bg-[#FAF9F6] pt-4 pb-6 overflow-hidden border-b-2 border-[#111]">
         {/* Cloud SVG backdrop */}
         <div className="absolute inset-x-0 bottom-0 pointer-events-none">
           <svg className="w-full h-24" viewBox="0 0 392 90" fill="none" preserveAspectRatio="none">
-            <path d="M -20 90 Q -10 40 30 50 Q 70 30 100 65 Q 120 90 120 90 Z" fill="#26B9D5" stroke="#111" strokeWidth="2.5" />
-            <path d="M 80 90 Q 110 30 160 35 Q 200 20 220 70 Z" fill="#FFCB1F" stroke="#111" strokeWidth="2.5" />
-            <path d="M 190 90 Q 230 25 270 40 Q 310 15 340 70 Z" fill="#FF6464" stroke="#111" strokeWidth="2.5" />
-            <path d="M 300 90 Q 330 35 370 45 Q 410 40 410 90 Z" fill="#9B6BFF" stroke="#111" strokeWidth="2.5" />
+            <path d="M -20 90 Q -10 40 30 50 Q 70 30 100 65 Q 120 90 120 90 Z" fill="#29CEB4" stroke="#111" strokeWidth="2.5" />
+            <path d="M 80 90 Q 110 30 160 35 Q 200 20 220 70 Z" fill="#EF7B28" stroke="#111" strokeWidth="2.5" />
+            <path d="M 190 90 Q 230 25 270 40 Q 310 15 340 70 Z" fill="#EF7B28" stroke="#111" strokeWidth="2.5" />
+            <path d="M 300 90 Q 330 35 370 45 Q 410 40 410 90 Z" fill="#9662FF" stroke="#111" strokeWidth="2.5" />
             <path d="M -10 90 C 20 60 70 60 100 90 C 140 55 200 55 240 90 C 280 60 350 60 400 90 Z" fill="#FAF9F6" />
           </svg>
         </div>
@@ -173,33 +182,54 @@ export default function Portfolio({ navigate, account, className }: Props) {
           <p className="text-4xl font-extrabold text-[#111]">
             {loadingBalance ? 'Loading…' : (balance ?? '—')}
           </p>
-          <p className="text-sm font-semibold text-gray-400 mt-0.5">≈ $0.00 USD</p>
         </div>
 
         {/* Quick actions row */}
         <div className="grid grid-cols-3 gap-3">
           {[
-            { label: 'Fund', icon: 'M12 5v14M5 12h14', action: () => navigate('fund') },
-            { label: 'Send', icon: 'M22 2L11 13M22 2L15 22l-4-9-9-4 20-7z', action: () => {} },
-            { label: 'Buy', icon: 'M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z', action: () => {} },
-          ].map(({ label, icon, action }) => (
+            { label: 'Fund', icon: 'M12 5v14M5 12h14', action: () => navigate('fund'), comingSoon: false },
+            { label: 'Send', icon: 'M22 2L11 13M22 2L15 22l-4-9-9-4 20-7z', action: null, comingSoon: true },
+            { label: 'Buy', icon: 'M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z', action: null, comingSoon: true },
+          ].map(({ label, icon, action, comingSoon }) => (
             <button
               key={label}
-              onClick={action}
-              className="h-[88px] bg-white rounded-[18px] border-2 border-[#111] shadow-neo flex flex-col items-center justify-center gap-2 shadow-neo-active"
+              onClick={action ?? undefined}
+              disabled={comingSoon}
+              title={comingSoon ? 'Coming soon' : undefined}
+              className="h-[88px] bg-white rounded-[18px] border-2 border-[#111] shadow-neo flex flex-col items-center justify-center gap-2 shadow-neo-active disabled:opacity-40 disabled:cursor-not-allowed"
             >
               <svg className="w-6 h-6 stroke-current fill-none stroke-[2.2]" viewBox="0 0 24 24">
                 <path d={icon} />
               </svg>
               <span className="text-sm font-extrabold text-[#111]">{label}</span>
+              {comingSoon && (
+                <span className="text-[9px] font-bold text-gray-400 -mt-1">Coming soon</span>
+              )}
             </button>
           ))}
         </div>
 
+        {/* H3: Action error card */}
+        {actionError !== null && (
+          <div className="border-2 border-[#EF7B28] rounded-[18px] p-4 text-[#EF7B28] font-bold text-sm flex items-center justify-between gap-3">
+            <span>{actionError}</span>
+            <button
+              onClick={() => setActionError(null)}
+              className="text-[#EF7B28] font-extrabold text-xs underline shrink-0"
+              aria-label="Dismiss error"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
+
         {/* Floor positions */}
         {loadingPositions ? (
           <div className="bg-white border-2 border-[#111] rounded-[18px] shadow-neo-sm p-6 text-center">
-            <p className="text-sm font-semibold text-gray-500">Loading floors…</p>
+            <p className="text-sm font-semibold text-gray-500 flex items-center justify-center">
+              <span className="w-4 h-4 border-2 border-[#111] border-t-transparent rounded-full animate-spin inline-block mr-2" />
+              Loading floors…
+            </p>
           </div>
         ) : positions.length === 0 ? (
           <div className="bg-white border-2 border-[#111] rounded-[18px] shadow-neo-sm p-6 flex flex-col items-center gap-3 text-center">

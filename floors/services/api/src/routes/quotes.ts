@@ -323,7 +323,7 @@ export function registerQuoteRoutes(app: FastifyInstance, riskUrl: string): void
         sig: riskData['sig'],
         key_id: riskData['key_id'] ?? 0,
         expires_at_ns: riskData['expires_at'] !== undefined
-          ? (BigInt(riskData['expires_at'] as number) * 1_000_000_000n).toString()
+          ? (BigInt(String(riskData['expires_at'])) * 1_000_000_000n).toString()
           : undefined,
         floor_bps: floorBps,
         duration_secs: floorDurationSecs,

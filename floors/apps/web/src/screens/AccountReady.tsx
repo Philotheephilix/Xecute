@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import type { Screen, AccountState } from '../App';
 
 interface Props {
@@ -13,12 +14,18 @@ function truncateAddress(addr: string): string {
 }
 
 export default function AccountReady({ navigate, account, className }: Props) {
-  const accountId = account?.accountId ?? '0sabc123def456';
+  useEffect(() => {
+    if (!account) navigate('welcome');
+  }, [account, navigate]);
+
+  if (!account) return null;
+
+  const accountId = account.accountId;
 
   return (
     <div className={className}>
       {/* Hero orange gradient header */}
-      <div className="relative w-full bg-gradient-to-b from-[#ED7725] to-[#F28530] border-b-2 border-[#111] rounded-b-[28px] pt-14 px-6 pb-8 shadow-neo-lg overflow-hidden">
+      <div className="relative w-full bg-gradient-to-b from-[#ED7725] to-[#EF7B28] border-b-2 border-[#111] rounded-b-[28px] pt-14 px-6 pb-8 shadow-neo-lg overflow-hidden">
         {/* Cloud SVG watermark */}
         <svg
           className="absolute right-[-10px] bottom-[-20px] w-48 h-48 opacity-15 pointer-events-none"
@@ -38,7 +45,7 @@ export default function AccountReady({ navigate, account, className }: Props) {
           <div className="w-20 h-20 bg-white border-2 border-[#111] rounded-full shadow-neo flex items-center justify-center">
             <svg
               className="w-10 h-10 stroke-current fill-none stroke-[2.5]"
-              style={{ color: '#44C760' }}
+              style={{ color: '#29CEB4' }}
               viewBox="0 0 24 24"
             >
               <polyline points="20 6 9 17 4 12" />
@@ -69,7 +76,7 @@ export default function AccountReady({ navigate, account, className }: Props) {
             'Buy crypto directly from X posts',
           ].map((feat) => (
             <div key={feat} className="flex items-center gap-3">
-              <div className="w-5 h-5 shrink-0 rounded-full bg-[#44C760] border-2 border-[#111] flex items-center justify-center">
+              <div className="w-5 h-5 shrink-0 rounded-full bg-[#29CEB4] border-2 border-[#111] flex items-center justify-center">
                 <svg className="w-2.5 h-2.5 stroke-current fill-none stroke-[3]" viewBox="0 0 24 24">
                   <polyline points="20 6 9 17 4 12" />
                 </svg>
@@ -84,7 +91,7 @@ export default function AccountReady({ navigate, account, className }: Props) {
           onClick={() => navigate('setup-defaults')}
           className="w-full h-14 bg-[#9662FF] text-white border-2 border-[#111] rounded-[13px] text-base font-extrabold shadow-neo shadow-neo-active"
         >
-          Enable Trading
+          Set Up Trading
         </button>
 
         {/* Skip to fund */}

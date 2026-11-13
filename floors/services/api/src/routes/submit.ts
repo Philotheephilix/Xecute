@@ -3,6 +3,7 @@
  * /v1/status/:status_id/stream — GET SSE stream for buy status updates
  */
 
+import { createHash, createVerify } from 'node:crypto';
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { FloorApiError } from '@floors/shared-server';
@@ -18,6 +19,9 @@ const AssertionSchema = z.object({
   credential_id: z.string().min(1),
   ticker: z.string().min(1),
   amount_usdc: z.string().regex(/^\d+$/, 'amount_usdc must be integer string'),
+  // WebAuthn assertion fields (hex-encoded) — required for server-side signature verification
+  authenticator_data: z.string().min(1).optional(),
+  client_data_json: z.string().min(1).optional(),
 });
 
 const SubmitBodySchema = z.object({
@@ -44,6 +48,83 @@ interface BuySubmissionRow {
   status: string;
   created_at: Date;
   updated_at: Date;
+}
+
+// ---------------------------------------------------------------------------
+// Account row (for public key lookup)
+// ---------------------------------------------------------------------------
+
+interface AccountRow {
+  public_key_hex: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// WebAuthn signature verification
+// ---------------------------------------------------------------------------
+
+/**
+ * Verify a WebAuthn P-256 assertion signature server-side.
+ *
+ * Standard verification steps (WebAuthn Level 2 §7.2):
+ *   1. clientDataHash = SHA-256(clientDataJSON)
+ *   2. message = authenticatorData || clientDataHash
+ *   3. Verify signature over message using the stored P-256 public key
+ *
+ * The stored key is a compressed P-256 point (33 bytes, hex).
+ * Node's `crypto.createVerify` expects a SubjectPublicKeyInfo (SPKI) DER buffer,
+ * so we wrap the raw key bytes accordingly.
+ *
+ * @returns true if valid, false if invalid, null if verification could not run
+ *          (missing fields or unsupported key format — caller decides policy).
+ */
+function verifyWebAuthnAssertion(
+  publicKeyHex: string,
+  authenticatorDataHex: string,
+  clientDataJsonHex: string,
+  signatureHex: string,
+): boolean {
+  // Decode hex inputs
+  const authenticatorData = Buffer.from(authenticatorDataHex, 'hex');
+  const clientDataJSON = Buffer.from(clientDataJsonHex, 'hex');
+  const rawSig = Buffer.from(signatureHex, 'hex');
+
+  // Step 1: hash clientDataJSON
+  const clientDataHash = createHash('sha256').update(clientDataJSON).digest();
+
+  // Step 2: message = authenticatorData || clientDataHash
+  const message = Buffer.concat([authenticatorData, clientDataHash]);
+
+  // Step 3: build SPKI DER from compressed P-256 key (33 bytes)
+  // SPKI header for P-256: sequence { sequence { OID ecPublicKey, OID P-256 }, bitString { 0x00, key } }
+  const rawKey = Buffer.from(publicKeyHex, 'hex');
+
+  // P-256 SPKI header (fixed bytes for algorithm identifier)
+  const spkiHeader = Buffer.from(
+    '3059301306072a8648ce3d020106082a8648ce3d030107034200',
+    'hex',
+  );
+  // The header above ends with 0x03 0x42 0x00 which covers an uncompressed key (65 bytes).
+  // For compressed keys (33 bytes) adjust the BIT STRING length: 0x03 0x22 0x00
+  const spkiHeaderCompressed = Buffer.from(
+    '3039301306072a8648ce3d020106082a8648ce3d03010703220000',
+    'hex',
+  );
+  // Fix: build header dynamically for correct lengths
+  const keyLength = rawKey.length; // 33 (compressed) or 65 (uncompressed)
+  const bitStringBody = Buffer.concat([Buffer.from([0x00]), rawKey]); // leading 0x00 = no unused bits
+  const bitStringLen = bitStringBody.length;
+  const algoId = Buffer.from('301306072a8648ce3d020106082a8648ce3d030107', 'hex');
+  const bitStringTag = Buffer.from([0x03, bitStringLen]);
+  const spkiBody = Buffer.concat([algoId, bitStringTag, bitStringBody]);
+  const spkiDer = Buffer.concat([Buffer.from([0x30, spkiBody.length]), spkiBody]);
+
+  // Suppress unused variable warnings for the static buffers above
+  void spkiHeader; void spkiHeaderCompressed; void keyLength;
+
+  // The signature from WebAuthn is DER-encoded; createVerify('SHA256') handles raw message hashing
+  const verifier = createVerify('SHA256');
+  verifier.update(message);
+  return verifier.verify({ key: spkiDer, format: 'der', type: 'spki' }, rawSig);
 }
 
 // ---------------------------------------------------------------------------
@@ -129,12 +210,56 @@ export function registerSubmitRoutes(
     }
     // If quote expired from cache (>15s), we still proceed — the user signed valid data
 
-    // Derive account_id from credential_id (P1: hex of credential bytes, lowercase)
-    // NEAR account IDs must be lowercase [a-z0-9._-]
-    // Base64URL → bytes → hex lowercase is safe
-    const credBytes = Buffer.from(assertion.credential_id.replace(/-/g, '+').replace(/_/g, '/'), 'base64');
-    const credHex = credBytes.toString('hex').slice(0, 32); // max 32 chars before dot
-    const account_id = `${credHex || 'floors-user'}.floors.near`;
+    // Look up account_id and public_key_hex from DB using the credential_id.
+    const accountRows = await db<Array<{ account_id: string; public_key_hex: string | null }>>`
+      SELECT account_id, public_key_hex FROM api.accounts WHERE credential_id = ${assertion.credential_id}
+    `;
+    if (accountRows.length === 0 || accountRows[0] === undefined) {
+      throw new FloorApiError('ACCOUNT_NOT_FOUND', 'No account found for this credential', false, 404);
+    }
+    const { account_id, public_key_hex } = accountRows[0];
+
+    // Verify WebAuthn P-256 assertion signature.
+    // TODO: once all clients send authenticator_data + client_data_json, make these required
+    //   and remove the fallback log-only path.
+    if (
+      assertion.authenticator_data !== undefined &&
+      assertion.client_data_json !== undefined
+    ) {
+      if (public_key_hex === null || public_key_hex.length === 0) {
+        // No stored public key — cannot verify; reject to prevent bypass
+        throw new FloorApiError(
+          'UNAUTHORIZED',
+          'No public key on record for this credential; cannot verify signature',
+          false,
+          401,
+        );
+      }
+      let sigValid: boolean;
+      try {
+        sigValid = verifyWebAuthnAssertion(
+          public_key_hex,
+          assertion.authenticator_data,
+          assertion.client_data_json,
+          assertion.signature,
+        );
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        request.log.warn({ event: 'webauthn_verify_error', err: msg }, 'WebAuthn verification threw');
+        throw new FloorApiError('UNAUTHORIZED', 'Signature verification failed', false, 401);
+      }
+      if (!sigValid) {
+        throw new FloorApiError('UNAUTHORIZED', 'WebAuthn signature is invalid', false, 401);
+      }
+      request.log.info({ event: 'webauthn_verified' }, 'WebAuthn signature verified');
+    } else {
+      // Legacy clients that do not send authenticator_data/client_data_json — log and continue.
+      // TODO: remove this branch once all clients are updated.
+      request.log.warn(
+        { event: 'webauthn_skipped', credential_id: assertion.credential_id },
+        'WebAuthn assertion fields missing — signature not verified (legacy client)',
+      );
+    }
 
     request.log.info(
       { quote_id, ticker: assertion.ticker, amount_usdc: assertion.amount_usdc, event: 'submit_received' },

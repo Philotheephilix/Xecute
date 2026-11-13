@@ -3,6 +3,9 @@ import type { Screen, AccountState } from '../App';
 import { createPasskey, extractCompressedP256Key, toHex } from '../lib/passkey';
 import { createAccount } from '../api/client';
 
+const REQUIRE_INVITE =
+  (import.meta as ImportMeta & { env: Record<string, string> }).env['VITE_REQUIRE_INVITE'] === 'true';
+
 interface Props {
   navigate: (to: Screen) => void;
   account: AccountState | null;
@@ -44,7 +47,7 @@ export default function CreatePasskey({ navigate, setAccount, account, className
         {/* Header */}
         <div className="flex items-center gap-4 mb-8">
           <button
-            onClick={() => navigate('welcome')}
+            onClick={() => navigate(REQUIRE_INVITE ? 'invite-code' : 'welcome')}
             className="w-11 h-11 bg-white border-2 border-[#111] rounded-[13px] shadow-neo-sm shadow-neo-active flex items-center justify-center"
             aria-label="Go back"
           >

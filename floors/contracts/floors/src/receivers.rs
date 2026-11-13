@@ -350,6 +350,10 @@ impl Contract {
         let refusal: Vec<U128> = amounts.clone();
         let floor_usdc = floor_usdc.0;
 
+        // Decode the quote ID so we can release it on any failure path.
+        // This must succeed — the hex was valid when hold_quote was called in mt_on_transfer.
+        let quote_id_bytes: Option<[u8; 32]> = decode_hex32(&quote_id_hex);
+
         // C3 fix: Extract sleeve_id before full deserialization so rollback works even
         // if full quote deserialization fails.
         #[derive(serde::Deserialize)]
@@ -363,24 +367,29 @@ impl Contract {
             Ok(q) => q,
             Err(_) => {
                 self.rollback_sleeve_hold(&sleeve_id_for_rollback, floor_usdc);
+                if let Some(qid) = quote_id_bytes { self.release_quote(qid); }
                 return refusal;
             }
         };
 
         let Ok(expected_qty) = quote.qty.parse::<u128>() else {
             self.rollback_sleeve_hold(&quote.sleeve, floor_usdc);
+            if let Some(qid) = quote_id_bytes { self.release_quote(qid); }
             return refusal;
         };
         let Ok(expected_fee) = quote.fee_usdc.parse::<u128>() else {
             self.rollback_sleeve_hold(&quote.sleeve, floor_usdc);
+            if let Some(qid) = quote_id_bytes { self.release_quote(qid); }
             return refusal;
         };
         let Ok(floor_price_e6) = quote.floor_price_e6.parse::<u128>() else {
             self.rollback_sleeve_hold(&quote.sleeve, floor_usdc);
+            if let Some(qid) = quote_id_bytes { self.release_quote(qid); }
             return refusal;
         };
         let Ok(expires_at_ns) = quote.expires_at_ns.parse::<u64>() else {
             self.rollback_sleeve_hold(&quote.sleeve, floor_usdc);
+            if let Some(qid) = quote_id_bytes { self.release_quote(qid); }
             return refusal;
         };
 
@@ -398,6 +407,7 @@ impl Contract {
             Some(p) if p.price >= 0 => p,
             _ => {
                 self.rollback_sleeve_hold(&quote.sleeve, floor_usdc);
+                if let Some(qid) = quote_id_bytes { self.release_quote(qid); }
                 return refusal;
             }
         };
@@ -412,6 +422,7 @@ impl Contract {
                     Some(v) => v,
                     None => {
                         self.rollback_sleeve_hold(&quote.sleeve, floor_usdc);
+                        if let Some(qid) = quote_id_bytes { self.release_quote(qid); }
                         return refusal;
                     }
                 }
@@ -422,11 +433,21 @@ impl Contract {
         };
 
         // Validate price: floor_price_e6 <= pyth_price_e6 * (10000 + tolerance_bps) / 10000
+        //
+        // Tolerance direction: the risk service sets strike = spot * (1 - depth), so the
+        // floor price is always strictly below spot at quote time. The tolerance_bps allowance
+        // on the RIGHT side (Pyth price) handles the case where Pyth is slightly stale and
+        // reports a price LOWER than the current market (i.e. spot has risen since the last
+        // Pyth update). In that scenario, the floor price may appear marginally above the
+        // stale Pyth price but is still legitimately below true spot. Allowing up to
+        // tolerance_bps (default 100 bps = 1%) above the reported Pyth price is intentional
+        // and safe: the risk service already prices in the Pyth staleness window.
         let tolerance_bps = u128::from(self.params.pyth_tolerance_bps);
         let lhs = floor_price_e6.saturating_mul(10_000);
         let rhs = pyth_price_e6.saturating_mul(10_000 + tolerance_bps);
         if lhs > rhs {
             self.rollback_sleeve_hold(&quote.sleeve, floor_usdc);
+            if let Some(qid) = quote_id_bytes { self.release_quote(qid); }
             return refusal;
         }
 

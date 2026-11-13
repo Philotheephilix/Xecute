@@ -52,7 +52,7 @@ async function setupVirtualAuthenticator(
 // ---------------------------------------------------------------------------
 
 test(
-  'full onboarding flow: welcome → passkey → creating → account-ready → enable-trading → fund',
+  'full onboarding flow: welcome → passkey → creating → account-ready → setup-defaults → enable-trading → fund',
   async ({ page }) => {
     test.setTimeout(60_000);
     // Collect real API responses for assertions
@@ -111,42 +111,20 @@ test(
       console.log(`[onboarding] POST /v1/accounts → ${createAccountCall.status}: ${createAccountCall.body.slice(0, 120)}`);
     }
 
-    // ── Step 7: Click "Enable Trading" ────────────────────────────────────────
-    // EnableTrading.tsx: calls GET /v1/accounts/:id/enable-trading-request,
-    // then WebAuthn credentials.get() (CDP virtual authenticator handles assertion),
-    // then POST to relayer /v1/relay/enable-trading.
-    // If endpoint returns 404/501 the app skips straight to fund — both paths are valid.
+    // ── Step 7: Click "Enable Trading" on AccountReady ───────────────────────
+    // AccountReady now navigates to setup-defaults first (screen order changed:
+    //   account-ready → setup-defaults → enable-trading → fund).
+    // After this click we are on setup-defaults, NOT yet on enable-trading.
     await page.getByRole('button', { name: 'Enable Trading' }).click();
 
-    // Enable Trading screen visible
-    await expect(page.getByText('One tap to start trading')).toBeVisible({ timeout: 5_000 });
-
-    // Click "Enable Trading (one tap)" button — triggers WebAuthn assertion
-    // or jumps straight to fund if endpoint not yet implemented.
-    // Either outcome is acceptable.
-    const enableBtn = page.getByRole('button', { name: /enable trading \(one tap\)/i });
-    const isEnableBtnVisible = await enableBtn.isVisible().catch(() => false);
-
-    if (isEnableBtnVisible) {
-      await enableBtn.click();
-      // Wait for the app to leave enable-trading: it will show either:
-      //   (a) "Fund Account" (success path)
-      //   (b) "Set Your Floor Defaults" (P2 setup-defaults path)
-      //   (c) "Skip for now" button (error / relayer not implemented)
-      // We wait up to 15s then navigate forward regardless.
-      await page.waitForTimeout(1_000); // let the async call fire
-    } else {
-      // Button label already changed — fall through
-    }
-
-    // ── Step 7b: Navigate forward through any intermediate screens ───────────
-    // Handle: enable-trading error / setup-defaults / already on fund
-    // Poll up to 15s, clicking "Skip for now" / "Save & Continue" as needed.
+    // ── Step 7b: Navigate forward through intermediate screens ───────────────
+    // Handle in order: setup-defaults → enable-trading → fund
+    // Poll up to 15s (30 × 500ms), clicking through each screen as needed.
     for (let i = 0; i < 30; i++) {
       const isOnFund = await page.getByText('Fund Account').isVisible().catch(() => false);
       if (isOnFund) break;
 
-      // On setup-defaults — click skip to proceed to fund
+      // On setup-defaults — click "Skip for now" to proceed to enable-trading
       const isOnDefaults = await page.getByText('Set Your Floor Defaults').isVisible().catch(() => false);
       if (isOnDefaults) {
         const skipBtn = page.getByRole('button', { name: 'Skip for now' });
@@ -157,7 +135,21 @@ test(
         }
       }
 
-      // On enable-trading (error state or normal) — click "Skip for now"
+      // On enable-trading — click "Enable Trading (one tap)" if available,
+      // otherwise click "Skip for now" to proceed to fund.
+      const isOnEnableTrading = await page.getByText('One tap to start trading').isVisible().catch(() => false);
+      if (isOnEnableTrading) {
+        const enableBtn = page.getByRole('button', { name: /enable trading \(one tap\)/i });
+        if (await enableBtn.isVisible().catch(() => false)) {
+          await enableBtn.click();
+          // Let the async WebAuthn / relayer call fire before checking next screen
+          await page.waitForTimeout(1_000);
+          continue;
+        }
+        // "Enable Trading (one tap)" not yet present — fall through to skip
+      }
+
+      // Generic "Skip for now" catches enable-trading error state or any other screen
       const skipBtn = page.getByRole('button', { name: 'Skip for now' });
       if (await skipBtn.isVisible().catch(() => false)) {
         await skipBtn.click();

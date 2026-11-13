@@ -145,8 +145,7 @@ export async function createPasskey(): Promise<PasskeyCreationResult> {
       },
       challenge: crypto.getRandomValues(new Uint8Array(32)),
       pubKeyCredParams: [
-        { alg: -7, type: 'public-key' as const },   // ES256
-        { alg: -8, type: 'public-key' as const },   // EdDSA
+        { alg: -7, type: 'public-key' as const },   // ES256 / P-256
       ],
       authenticatorSelection: {
         residentKey: 'required' as const,

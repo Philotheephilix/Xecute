@@ -52,6 +52,13 @@ pub trait FloorsSelf {
         asset: String,
         amount: U128,
     );
+    fn on_auto_protect_sell_payout(
+        &mut self,
+        floor_id: u64,
+        payout_usdc: U128,
+        asset_qty: U128,
+        reserved_usdc: U128,
+    );
 }
 
 const GAS_TRANSFER: Gas = Gas::from_tgas(20);
@@ -263,8 +270,20 @@ impl Contract {
             floor_mut.status = FloorStatus::ClosePending;
         }
 
-        // Update state synchronously before the transfer
-        self.finalize_close_state(floor_id, qty, reserved_usdc, &asset, &sleeve_id);
+        // Remove from held now (USDC is no longer reserved for this floor).
+        // Do NOT release free_usdc / totals.free yet — that only happens in the
+        // success callback so a concurrent mt_on_transfer cannot see inflated capacity.
+        {
+            let usdc_id = self.params.usdc.clone();
+            let t = self.totals.entry(usdc_id).or_insert_with(Totals::default);
+            t.reserved = t.reserved.saturating_sub(reserved_usdc);
+            // held stays the same until on_close_transfer (asset qty deducted there)
+        }
+        // Reduce escrow immediately — tokens are leaving escrow on this transfer.
+        {
+            let t = self.totals.entry(asset.clone()).or_insert_with(Totals::default);
+            t.escrow = t.escrow.saturating_sub(qty);
+        }
 
         let intents = self.params.intents.clone();
 
@@ -309,6 +328,18 @@ impl Contract {
                 t.held = t.held.saturating_sub(qty_returned);
             }
 
+            // Transfer succeeded: now safe to release reserved USDC back to sleeve capacity.
+            // (close() already subtracted totals.reserved; here we add back to free.)
+            {
+                let usdc_id = self.params.usdc.clone();
+                let t = self.totals.entry(usdc_id).or_insert_with(Totals::default);
+                t.free += floor.reserved_usdc;
+            }
+            if let Some(sleeve) = self.sleeves.get_mut(&floor.sleeve) {
+                sleeve.reserved_usdc = sleeve.reserved_usdc.saturating_sub(floor.reserved_usdc);
+                sleeve.free_usdc += floor.reserved_usdc;
+            }
+
             crate::events::emit_floor_closed(&crate::events::FloorClosedEvent {
                 floor_id,
                 owner: floor.owner.to_string(),
@@ -316,8 +347,22 @@ impl Contract {
                 unlocked_usdc: floor.reserved_usdc.to_string(),
             });
         } else {
-            // Transfer failed: reverse the close state
-            self.reverse_close_state(floor_id, qty_returned, floor.reserved_usdc, &floor.asset, &floor.sleeve);
+            // Transfer failed: reverse the close state.
+            // close() already subtracted totals.reserved — restore it.
+            {
+                let usdc_id = self.params.usdc.clone();
+                let t = self.totals.entry(usdc_id).or_insert_with(Totals::default);
+                t.reserved += floor.reserved_usdc;
+            }
+            // Restore asset escrow (close() already subtracted it).
+            {
+                let t = self.totals.entry(floor.asset.clone()).or_insert_with(Totals::default);
+                t.escrow += qty_returned;
+            }
+            // Restore floor to Active.
+            if let Some(floor_mut) = self.floors.get_mut(&floor_id) {
+                floor_mut.status = FloorStatus::Active;
+            }
         }
 
         if let Some(t) = self.totals.get(&floor.asset) {
@@ -330,10 +375,17 @@ impl Contract {
 
     /// Expire floors that have passed their expiry timestamp.
     /// Permissionless — anyone can call. Processes up to `expire_batch_max` ids.
+    /// Caller must attach exactly N yoctoNEAR where N = ids.len(), since each
+    /// mt_transfer call requires 1 yoctoNEAR as deposit.
     /// H7: batch expire. L4: #[payable].
     #[payable]
     pub fn expire(&mut self, ids: Vec<u64>) -> Vec<Promise> {
         near_sdk::require!(!ids.is_empty(), "E_BAD_MSG: ids must not be empty");
+        let required = NearToken::from_yoctonear(ids.len() as u128);
+        near_sdk::require!(
+            env::attached_deposit() >= required,
+            "E_DEPOSIT: attach N yocto for N floors"
+        );
 
         let batch_max = usize::from(self.params.expire_batch_max).max(1);
         let intents = self.params.intents.clone();
@@ -378,7 +430,17 @@ impl Contract {
                 floor_mut.status = FloorStatus::ExpirePending;
             }
 
-            self.finalize_expire_state(floor_id, qty, reserved_usdc, &asset, &sleeve_id);
+            // Remove from reserved now; do NOT release free_usdc yet (deferred to callback).
+            {
+                let usdc_id = self.params.usdc.clone();
+                let t = self.totals.entry(usdc_id).or_insert_with(Totals::default);
+                t.reserved = t.reserved.saturating_sub(reserved_usdc);
+            }
+            // Reduce escrow — tokens are leaving escrow on this transfer.
+            {
+                let t = self.totals.entry(asset.clone()).or_insert_with(Totals::default);
+                t.escrow = t.escrow.saturating_sub(qty);
+            }
 
             let p = ext_intents::ext(intents.clone())
                 .with_attached_deposit(NearToken::from_yoctonear(1))
@@ -424,6 +486,17 @@ impl Contract {
                 t.held = t.held.saturating_sub(qty_returned);
             }
 
+            // Transfer succeeded: now safe to release reserved USDC back to sleeve capacity.
+            {
+                let usdc_id = self.params.usdc.clone();
+                let t = self.totals.entry(usdc_id).or_insert_with(Totals::default);
+                t.free += floor.reserved_usdc;
+            }
+            if let Some(sleeve) = self.sleeves.get_mut(&floor.sleeve) {
+                sleeve.reserved_usdc = sleeve.reserved_usdc.saturating_sub(floor.reserved_usdc);
+                sleeve.free_usdc += floor.reserved_usdc;
+            }
+
             crate::events::emit_floor_expired(&crate::events::FloorExpiredEvent {
                 floor_id,
                 owner: floor.owner.to_string(),
@@ -431,7 +504,116 @@ impl Contract {
                 unlocked_usdc: floor.reserved_usdc.to_string(),
             });
         } else {
-            self.reverse_close_state(floor_id, qty_returned, floor.reserved_usdc, &floor.asset, &floor.sleeve);
+            // Transfer failed: restore reserved and escrow.
+            {
+                let usdc_id = self.params.usdc.clone();
+                let t = self.totals.entry(usdc_id).or_insert_with(Totals::default);
+                t.reserved += floor.reserved_usdc;
+            }
+            {
+                let t = self.totals.entry(floor.asset.clone()).or_insert_with(Totals::default);
+                t.escrow += qty_returned;
+            }
+            if let Some(floor_mut) = self.floors.get_mut(&floor_id) {
+                floor_mut.status = FloorStatus::Active;
+            }
+        }
+
+        if let Some(t) = self.totals.get(&floor.asset) {
+            t.assert_solvent(&floor.asset);
+        }
+        if let Some(t) = self.totals.get(&self.params.usdc.clone()) {
+            t.assert_usdc_solvent();
+        }
+    }
+
+    /// Callback after the USDC payout initiated by auto_protect / execute_floor_sell.
+    #[private]
+    pub fn on_auto_protect_sell_payout(
+        &mut self,
+        floor_id: u64,
+        payout_usdc: U128,
+        asset_qty: U128,
+        reserved_usdc: U128,
+    ) {
+        let payout_usdc = payout_usdc.0;
+        let asset_qty = asset_qty.0;
+        let reserved_usdc = reserved_usdc.0;
+
+        let success = matches!(
+            env::promise_result_checked(0, usize::MAX),
+            Ok(_)
+        );
+
+        let floor = match self.floors.get(&floor_id) {
+            Some(f) => f.clone(),
+            None => return,
+        };
+
+        let usdc_id = self.params.usdc.clone();
+
+        if success {
+            // Finalize: deduct from held and pending
+            {
+                let t = self.totals.entry(usdc_id.clone()).or_insert_with(Totals::default);
+                t.held = t.held.saturating_sub(payout_usdc);
+                t.pending = t.pending.saturating_sub(payout_usdc);
+            }
+            // Asset: escrow → delivered
+            {
+                let t = self.totals.entry(floor.asset.clone()).or_insert_with(Totals::default);
+                t.escrow = t.escrow.saturating_sub(asset_qty);
+                t.delivered += asset_qty;
+            }
+            // Sleeve: track delivered, release surplus
+            {
+                if let Some(sleeve) = self.sleeves.get_mut(&floor.sleeve) {
+                    let surplus = reserved_usdc.saturating_sub(payout_usdc);
+                    sleeve.free_usdc += surplus;
+                    let delivered = sleeve.delivered.entry(floor.asset.clone()).or_insert(0);
+                    *delivered += asset_qty;
+                }
+            }
+            // Mark floor Sold
+            {
+                let floor_mut = self.floors.get_mut(&floor_id).unwrap();
+                floor_mut.status = FloorStatus::Sold;
+                floor_mut.qty = 0;
+            }
+
+            crate::events::emit_floor_sold(&crate::events::FloorSoldEvent {
+                floor_id,
+                owner: floor.owner.to_string(),
+                qty: asset_qty.to_string(),
+                paid_usdc: payout_usdc.to_string(),
+                by: "auto_protect".to_string(),
+            });
+        } else {
+            // Payout failed — revert floor to Active so it can be retried.
+            {
+                let floor_mut = self.floors.get_mut(&floor_id).unwrap();
+                floor_mut.status = FloorStatus::Active;
+            }
+            // Revert totals: move pending back to reserved
+            {
+                let t = self.totals.entry(usdc_id.clone()).or_insert_with(Totals::default);
+                t.pending = t.pending.saturating_sub(payout_usdc);
+                t.reserved += reserved_usdc;
+            }
+            // Restore sleeve reservation
+            {
+                if let Some(sleeve) = self.sleeves.get_mut(&floor.sleeve) {
+                    sleeve.reserved_usdc += reserved_usdc;
+                }
+            }
+
+            crate::events::emit_payout_failed(&crate::events::PayoutFailedEvent {
+                floor_id: floor_id.to_string(),
+                owner: floor.owner.to_string(),
+                asset: usdc_id.clone(),
+                amount: payout_usdc.to_string(),
+                reason: "auto_protect mt_transfer failed".to_string(),
+            });
         }
 
         if let Some(t) = self.totals.get(&floor.asset) {
@@ -539,73 +721,3 @@ impl Contract {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Internal helpers — plain impl (not NEAR-exported)
-// ---------------------------------------------------------------------------
-
-impl Contract {
-    fn finalize_close_state(
-        &mut self,
-        _floor_id: u64,
-        qty: u128,
-        reserved_usdc: u128,
-        asset: &str,
-        sleeve_id: &str,
-    ) {
-        // Reduce escrow
-        {
-            let t = self.totals.entry(asset.to_string()).or_insert_with(Totals::default);
-            t.escrow = t.escrow.saturating_sub(qty);
-        }
-        // Return reserved USDC to sleeve free
-        {
-            let t = self.totals.entry(self.params.usdc.clone()).or_insert_with(Totals::default);
-            t.reserved = t.reserved.saturating_sub(reserved_usdc);
-            t.free += reserved_usdc;
-        }
-        if let Some(sleeve) = self.sleeves.get_mut(sleeve_id) {
-            sleeve.reserved_usdc = sleeve.reserved_usdc.saturating_sub(reserved_usdc);
-            sleeve.free_usdc += reserved_usdc;
-        }
-    }
-
-    fn finalize_expire_state(
-        &mut self,
-        floor_id: u64,
-        qty: u128,
-        reserved_usdc: u128,
-        asset: &str,
-        sleeve_id: &str,
-    ) {
-        self.finalize_close_state(floor_id, qty, reserved_usdc, asset, sleeve_id);
-    }
-
-    fn reverse_close_state(
-        &mut self,
-        floor_id: u64,
-        qty: u128,
-        reserved_usdc: u128,
-        asset: &str,
-        sleeve_id: &str,
-    ) {
-        // Re-add escrow
-        {
-            let t = self.totals.entry(asset.to_string()).or_insert_with(Totals::default);
-            t.escrow += qty;
-        }
-        // Re-reserve USDC
-        {
-            let t = self.totals.entry(self.params.usdc.clone()).or_insert_with(Totals::default);
-            t.reserved += reserved_usdc;
-            t.free = t.free.saturating_sub(reserved_usdc);
-        }
-        if let Some(sleeve) = self.sleeves.get_mut(sleeve_id) {
-            sleeve.reserved_usdc += reserved_usdc;
-            sleeve.free_usdc = sleeve.free_usdc.saturating_sub(reserved_usdc);
-        }
-        // Restore floor to Active
-        if let Some(floor_mut) = self.floors.get_mut(&floor_id) {
-            floor_mut.status = FloorStatus::Active;
-        }
-    }
-}

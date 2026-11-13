@@ -6,7 +6,7 @@
     "jsx": "react-jsx",
     "jsxImportSource": "preact",
     "outDir": "dist",
-    "rootDir": "src",
+    "rootDir": ".",
     "types": ["chrome"]
   },
   "include": ["src/**/*", "wxt.config.ts", "e2e/**/*"],

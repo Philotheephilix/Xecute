@@ -13,7 +13,7 @@ import { signWithPasskey } from '../../lib/webauthn.js';
 import { verifyAgainstSheet } from '@floors/intents';
 import type { IntentPayload } from '@floors/intents';
 
-const API_URL = 'http://localhost:3001';
+const API_URL = (import.meta as unknown as { env: Record<string, string | undefined> }).env['VITE_API_URL'] ?? 'http://localhost:3001';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -49,6 +49,8 @@ interface SheetState {
   postId: string | undefined;
   /** Floors account ID — read from localStorage key floors:account_id */
   accountId: string;
+  /** Passkey credential ID — read from localStorage key floors:credential_id */
+  savedCredentialId: string;
   screen: Screen;
   signing: boolean;
   statusId: string | null;
@@ -62,6 +64,8 @@ interface SheetState {
   partialFloorError: string | null;
   /** Partial outcome: actual quantity received from the swap */
   partialActualQty: string | null;
+  /** On-chain floor ID returned after a successful buy — used for sell-back */
+  floorId: string | null;
 }
 
 // ── URL params ────────────────────────────────────────────────────────────────
@@ -113,9 +117,9 @@ function BackArrow() {
       viewBox="0 0 24 24"
       fill="none"
       stroke="#111111"
-      stroke-width="2.5"
-      stroke-linecap="round"
-      stroke-linejoin="round"
+      strokeWidth="2.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
     >
       <line x1="19" y1="12" x2="5" y2="12" />
       <polyline points="12 19 5 12 12 5" />
@@ -131,9 +135,9 @@ function CheckCircle() {
       viewBox="0 0 24 24"
       fill="none"
       stroke="#29CEB4"
-      stroke-width="2.5"
-      stroke-linecap="round"
-      stroke-linejoin="round"
+      strokeWidth="2.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
     >
       <circle cx="12" cy="12" r="10" />
       <polyline points="9 12 11.5 14.5 15 10" />
@@ -149,9 +153,9 @@ function WarnCircle() {
       viewBox="0 0 24 24"
       fill="none"
       stroke="#EF7B28"
-      stroke-width="2.5"
-      stroke-linecap="round"
-      stroke-linejoin="round"
+      strokeWidth="2.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
     >
       <circle cx="12" cy="12" r="10" />
       <line x1="12" y1="8" x2="12" y2="12" />
@@ -218,7 +222,7 @@ function FloorRow({ floor, draftQuote, onChange }: FloorRowProps) {
           {bpsOptions.map(({ label, value }) => (
             <button
               key={value}
-              class={floor.bps === value ? btnActiveClass : undefined}
+              className={floor.bps === value ? btnActiveClass : undefined}
               style={floor.bps === value ? btnActive : btnInactive}
               onClick={() => onChange({ ...floor, bps: value })}
               aria-pressed={floor.bps === value}
@@ -237,7 +241,7 @@ function FloorRow({ floor, draftQuote, onChange }: FloorRowProps) {
             {durationOptions.map(({ label, value }) => (
               <button
                 key={value}
-                class={floor.duration_secs === value ? btnActiveClass : undefined}
+                className={floor.duration_secs === value ? btnActiveClass : undefined}
                 style={floor.duration_secs === value ? btnActive : btnInactive}
                 onClick={() => onChange({ ...floor, duration_secs: value })}
                 aria-pressed={floor.duration_secs === value}
@@ -287,7 +291,7 @@ function BuyScreen({ state, onConfirm, onBack, onFloorChange }: BuyScreenProps) 
 
   return (
     <div
-      class="screen screen-active"
+      className="screen screen-active"
       style={{ padding: '0', display: 'flex', flexDirection: 'column' }}
     >
       {/* Header */}
@@ -303,7 +307,7 @@ function BuyScreen({ state, onConfirm, onBack, onFloorChange }: BuyScreenProps) 
           boxShadow: '0px 5px 0px #111111',
         }}
       >
-        <button class="btn-back" onClick={onBack} aria-label="Back">
+        <button className="btn-back" onClick={onBack} aria-label="Back">
           <BackArrow />
         </button>
         <div style={{ flex: 1 }}>
@@ -365,7 +369,7 @@ function BuyScreen({ state, onConfirm, onBack, onFloorChange }: BuyScreenProps) 
           )}
 
           {draftError !== null && !draftLoading && (
-            <div style={{ fontSize: '13px', color: '#ef4444', fontWeight: 600 }}>
+            <div style={{ fontSize: '13px', color: '#EF7B28', fontWeight: 600 }}>
               {draftError}
             </div>
           )}
@@ -441,7 +445,7 @@ function BuyScreen({ state, onConfirm, onBack, onFloorChange }: BuyScreenProps) 
 
         {/* Confirm button */}
         <button
-          class="btn-neo"
+          className="btn-neo"
           onClick={onConfirm}
           disabled={signing || draftQuote === null || draftLoading}
           style={{
@@ -479,9 +483,11 @@ function BuyScreen({ state, onConfirm, onBack, onFloorChange }: BuyScreenProps) 
 function SigningScreen({ statusId }: { statusId: string | null }) {
   return (
     <div
-      class="screen screen-active"
+      className="screen screen-active"
       style={{ padding: '32px 18px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '400px' }}
     >
+      <style>{`@keyframes floors-spin { to { transform: rotate(360deg); } }`}</style>
+      <span style={{ display: 'inline-block', width: 20, height: 20, border: '2px solid #111', borderTopColor: 'transparent', borderRadius: '50%', animation: 'floors-spin 0.8s linear infinite', marginBottom: '12px' }} />
       <div style={{ fontSize: '16px', fontWeight: 700, color: '#111111', marginBottom: '8px' }}>
         Submitting Order...
       </div>
@@ -509,7 +515,7 @@ interface SuccessScreenProps {
 function SuccessScreen({ ticker, draftQuote, statusId, txHash, floorIncluded, floor, onViewPortfolio }: SuccessScreenProps) {
   return (
     <div
-      class="screen screen-enter-right screen-active"
+      className="screen screen-enter-right screen-active"
       style={{ padding: '0', display: 'flex', flexDirection: 'column' }}
     >
       <div
@@ -632,7 +638,7 @@ function SuccessScreen({ ticker, draftQuote, statusId, txHash, floorIncluded, fl
 
       <div style={{ padding: '0 18px 24px' }}>
         <button
-          class="btn-neo"
+          className="btn-neo"
           onClick={onViewPortfolio}
           style={{
             width: '100%',
@@ -667,7 +673,7 @@ interface PartialScreenProps {
 function PartialScreen({ ticker, draftQuote, floorError, actualQty, onAddFloor, onContinue, onSellBack }: PartialScreenProps) {
   return (
     <div
-      class="screen screen-enter-right screen-active"
+      className="screen screen-enter-right screen-active"
       style={{ padding: '0', display: 'flex', flexDirection: 'column' }}
     >
       <div
@@ -721,7 +727,7 @@ function PartialScreen({ ticker, draftQuote, floorError, actualQty, onAddFloor, 
         >
           {/* Swap success row — H6: show actual_qty if available, fall back to estimate */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <span style={{ fontSize: '16px', color: '#22c55e', fontWeight: 800 }}>✓</span>
+            <span style={{ fontSize: '16px', color: '#29CEB4', fontWeight: 800 }}>✓</span>
             <span style={{ fontSize: '13px', fontWeight: 700, color: '#111111' }}>
               Bought {actualQty ?? draftQuote?.display.est_amount ?? ''} {ticker}
             </span>
@@ -729,7 +735,7 @@ function PartialScreen({ ticker, draftQuote, floorError, actualQty, onAddFloor, 
 
           {/* Floor failure row */}
           <div style={{ display: 'flex', alignItems: 'flex-start', gap: '10px' }}>
-            <span style={{ fontSize: '16px', color: '#ef4444', fontWeight: 800, lineHeight: '20px' }}>✗</span>
+            <span style={{ fontSize: '16px', color: '#EF7B28', fontWeight: 800, lineHeight: '20px' }}>✗</span>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
               <span style={{ fontSize: '13px', fontWeight: 700, color: '#111111' }}>Floor wasn't added</span>
               <span style={{ fontSize: '12px', fontWeight: 600, color: '#9ca3af' }}>
@@ -742,7 +748,7 @@ function PartialScreen({ ticker, draftQuote, floorError, actualQty, onAddFloor, 
 
       <div style={{ padding: '0 18px 24px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
         <button
-          class="btn-neo"
+          className="btn-neo"
           onClick={onAddFloor}
           style={{
             width: '100%',
@@ -761,7 +767,7 @@ function PartialScreen({ ticker, draftQuote, floorError, actualQty, onAddFloor, 
           <span role="img" aria-label="shield">🛡</span> Try the floor again
         </button>
         <button
-          class="btn-neo"
+          className="btn-neo"
           onClick={onContinue}
           style={{
             width: '100%',
@@ -777,7 +783,7 @@ function PartialScreen({ ticker, draftQuote, floorError, actualQty, onAddFloor, 
         </button>
         {/* H5: swap the received tokens back to USDC */}
         <button
-          class="btn-neo"
+          className="btn-neo"
           onClick={onSellBack}
           style={{
             width: '100%',
@@ -801,13 +807,13 @@ function PartialScreen({ ticker, draftQuote, floorError, actualQty, onAddFloor, 
 function ErrorScreen({ message, onRetry }: { message: string; onRetry: () => void }) {
   return (
     <div
-      class="screen screen-active"
+      className="screen screen-active"
       style={{ padding: '32px 18px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '16px' }}
     >
-      <div style={{ fontSize: '20px', fontWeight: 800, color: '#ef4444' }}>Order Failed</div>
+      <div style={{ fontSize: '20px', fontWeight: 800, color: '#EF7B28' }}>Order Failed</div>
       <div style={{ fontSize: '13px', fontWeight: 600, color: '#6b7280', textAlign: 'center' }}>{message}</div>
       <button
-        class="btn-neo"
+        className="btn-neo"
         onClick={onRetry}
         style={{ width: '100%', height: '52px', background: '#EF7B28', color: '#111111', fontSize: '15px', fontWeight: 800 }}
       >
@@ -852,10 +858,20 @@ function App() {
     }
   })();
 
+  // Read passkey credential ID from localStorage (written by web app during passkey registration)
+  const savedCredentialId: string = (() => {
+    try {
+      return localStorage.getItem('floors:credential_id') ?? '';
+    } catch {
+      return '';
+    }
+  })();
+
   const [state, setState] = useState<SheetState>({
     ticker,
     postId,
     accountId: savedAccountId,
+    savedCredentialId,
     screen: 'buy',
     signing: false,
     statusId: null,
@@ -867,6 +883,7 @@ function App() {
     floor: savedFloor,
     partialFloorError: null,
     partialActualQty: null,
+    floorId: null,
   });
 
   // ── Fetch quote (refetches when floor selection changes) ──────────────────
@@ -983,7 +1000,7 @@ function App() {
       const hashBuffer = await crypto.subtle.digest('SHA-256', encoder.encode(challengePayload));
       const challenge = new Uint8Array(hashBuffer);
 
-      const assertion = await signWithPasskey(challenge);
+      const assertion = await signWithPasskey(challenge, state.savedCredentialId);
 
       const sigHex = Array.from(assertion.signature)
         .map((b) => b.toString(16).padStart(2, '0'))
@@ -1041,11 +1058,11 @@ function App() {
       await new Promise<void>((resolve) => {
         let resolved = false;
 
-        const finishSuccess = (txHash: string | null = null) => {
+        const finishSuccess = (txHash: string | null = null, floorId?: string | null) => {
           if (!resolved) {
             resolved = true;
             eventSource.close();
-            setState((s) => ({ ...s, signing: false, screen: 'success', txHash }));
+            setState((s) => ({ ...s, signing: false, screen: 'success', txHash, floorId: floorId ?? s.floorId }));
             resolve();
           }
         };
@@ -1085,7 +1102,14 @@ function App() {
               floor_error?: string;
               /** H6: actual quantity received from the swap */
               actual_qty?: string;
+              /** On-chain floor ID returned when a floor is opened */
+              floor_id?: string | null;
             };
+
+            // Capture floor_id whenever it appears in any event
+            if (data.floor_id != null) {
+              setState((s) => ({ ...s, floorId: String(data.floor_id) }));
+            }
 
             // Partial outcome: swap succeeded but floor failed
             if (data.type === 'partial' && data.swap_done === true && data.floor_error !== undefined) {
@@ -1094,7 +1118,7 @@ function App() {
             }
 
             if (data.state === 'submitted' || data.state === 'tracking' || data.state === 'done') {
-              finishSuccess(data.tx_hash ?? null);
+              finishSuccess(data.tx_hash ?? null, data.floor_id);
             } else if (data.state === 'failed') {
               finishError('Order failed');
             }
@@ -1104,10 +1128,32 @@ function App() {
         });
 
         eventSource.onerror = () => {
-          finishSuccess(null);
+          eventSource.close();
+          if (!resolved) {
+            resolved = true;
+            setState((s) => ({
+              ...s,
+              signing: false,
+              screen: 'error',
+              errorMsg: 'Transaction may still be processing — check your portfolio',
+            }));
+            resolve();
+          }
         };
 
-        setTimeout(() => finishSuccess(null), 8_000);
+        setTimeout(() => {
+          if (!resolved) {
+            resolved = true;
+            eventSource.close();
+            setState((s) => ({
+              ...s,
+              signing: false,
+              screen: 'error',
+              errorMsg: 'Still processing… check portfolio',
+            }));
+            resolve();
+          }
+        }, 8_000);
       });
     } catch (err) {
       console.error('[floors] Confirm failed:', err);
@@ -1157,8 +1203,12 @@ function App() {
     // H5: sell the partially-received tokens back to USDC.
     // XECUTE-109: 3-step signed action flow (challenge → sign → submit).
     // XECUTE-110: WYSIWYS — verifyAgainstSheet before signWithPasskey.
-    const { draftQuote: quote, accountId, partialActualQty } = state;
+    const { draftQuote: quote, accountId, savedCredentialId, partialActualQty, floorId } = state;
     if (!quote) return;
+    if (!floorId) {
+      setState((s) => ({ ...s, screen: 'error', errorMsg: 'Floor ID not available — cannot sell back' }));
+      return;
+    }
 
     setState((s) => ({ ...s, signing: true }));
 
@@ -1194,7 +1244,7 @@ function App() {
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'sell_to_floor', floor_id: quote.quote_id }),
+          body: JSON.stringify({ action: 'sell_to_floor', floor_id: floorId }),
         },
       );
       if (!challengeRes.ok) {
@@ -1208,7 +1258,7 @@ function App() {
 
       // Step 2: sign challenge with passkey
       const challengeBytes = hexToBytes(challenge);
-      const assertion = await signWithPasskey(challengeBytes);
+      const assertion = await signWithPasskey(challengeBytes, savedCredentialId);
       const sigHex = Array.from(assertion.signature)
         .map((b) => b.toString(16).padStart(2, '0'))
         .join('');
@@ -1220,7 +1270,7 @@ function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           action: 'sell_to_floor',
-          floor_id: quote.quote_id,
+          floor_id: floorId,
           account_id: accountId,
           signature: sigHex,
           credential_id: credentialId,

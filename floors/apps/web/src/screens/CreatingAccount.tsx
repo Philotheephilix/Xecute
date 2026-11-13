@@ -26,8 +26,10 @@ export default function CreatingAccount({ navigate, account, className }: Props)
     { label: 'Registering on-chain', status: 'pending' },
   ]);
   const [error, setError] = useState<string | null>(null);
+  const [networkWarning, setNetworkWarning] = useState(false);
   const pollingRef = useRef(false);
   const startTimeRef = useRef(Date.now());
+  const consecutiveErrorsRef = useRef(0);
 
   const markStep = (index: number, status: StepStatus) => {
     setSteps((prev) =>
@@ -72,7 +74,14 @@ export default function CreatingAccount({ navigate, account, className }: Props)
       } catch (err) {
         // Non-404 errors: log and keep polling (transient network issues)
         console.warn('[floors] CreatingAccount poll error:', err);
+        consecutiveErrorsRef.current += 1;
+        if (consecutiveErrorsRef.current >= 3) {
+          setNetworkWarning(true);
+        }
+        continue;
       }
+      consecutiveErrorsRef.current = 0;
+      setNetworkWarning(false);
 
       await new Promise<void>((r) => setTimeout(r, POLL_INTERVAL_MS));
     }
@@ -88,11 +97,14 @@ export default function CreatingAccount({ navigate, account, className }: Props)
 
   const handleRetry = () => {
     setError(null);
+    setNetworkWarning(false);
+    consecutiveErrorsRef.current = 0;
     setSteps([
       { label: 'Passkey created', status: 'done' },
       { label: 'Creating NEAR account…', status: 'active' },
       { label: 'Registering on-chain', status: 'pending' },
     ]);
+    startTimeRef.current = Date.now(); // H5: reset timer so timeout counts from retry, not from failed attempt
     void runPolling();
   };
 
@@ -165,6 +177,18 @@ export default function CreatingAccount({ navigate, account, className }: Props)
             </div>
           ))}
         </div>
+
+        {/* Network warning — shown after 3 consecutive poll errors */}
+        {networkWarning && error === null && (
+          <div className="flex items-center gap-2 text-sm font-semibold text-[#EF7B28]">
+            <svg className="w-4 h-4 shrink-0 stroke-current fill-none stroke-[2.5]" viewBox="0 0 24 24">
+              <circle cx="12" cy="12" r="10" />
+              <line x1="12" y1="8" x2="12" y2="12" />
+              <line x1="12" y1="16" x2="12.01" y2="16" />
+            </svg>
+            Connection issues, retrying…
+          </div>
+        )}
 
         {/* Retry button on error */}
         {error !== null && (

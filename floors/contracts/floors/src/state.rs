@@ -245,6 +245,10 @@ pub struct Unwind {
     pub min_usdc_out: u128,
     pub started_ns: u64,
     pub status: UnwindStatus,
+    /// USDC balance of deposit_account captured BEFORE the unwind token transfer.
+    /// on_unwind_settle computes proceeds = current_balance - pre_balance_e6 to
+    /// avoid crediting pre-existing USDC in that account.
+    pub pre_balance_e6: u128,
 }
 
 #[near(serializers = [borsh, json])]

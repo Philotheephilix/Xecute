@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import type { Screen, AccountState } from '../App';
 
 interface Props {
@@ -10,7 +11,23 @@ interface Props {
 const REQUIRE_INVITE =
   (import.meta as ImportMeta & { env: Record<string, string> }).env['VITE_REQUIRE_INVITE'] === 'true';
 
-export default function Welcome({ navigate, className }: Props) {
+export default function Welcome({ navigate, setAccount, className }: Props) {
+  const [signInError, setSignInError] = useState<string | null>(null);
+
+  const handleSignIn = () => {
+    const accountId = localStorage.getItem('floors:account_id');
+    const credentialId = localStorage.getItem('floors:credential_id');
+    const publicKey = localStorage.getItem('floors:public_key');
+
+    if (!accountId || !credentialId || !publicKey) {
+      setSignInError('No existing account found.');
+      return;
+    }
+
+    setSignInError(null);
+    setAccount({ accountId, credentialId, publicKey, compressedKeyHex: '' });
+    navigate('portfolio');
+  };
   return (
     <div className={className}>
       <div className="flex flex-col items-center justify-between min-h-full px-6 py-12">
@@ -68,11 +85,14 @@ export default function Welcome({ navigate, className }: Props) {
             Already have an account?{' '}
             <button
               className="text-gray-700 font-bold underline underline-offset-2"
-              onClick={() => navigate('portfolio')}
+              onClick={handleSignIn}
             >
               Sign in
             </button>
           </p>
+          {signInError !== null && (
+            <p className="text-center text-sm font-semibold text-[#EF7B28]">{signInError}</p>
+          )}
         </div>
       </div>
     </div>

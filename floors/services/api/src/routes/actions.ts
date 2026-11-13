@@ -7,6 +7,7 @@ import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { FloorApiError } from '@floors/shared-server';
 import type postgres from 'postgres';
+import { randomInt } from 'node:crypto';
 
 // ---------------------------------------------------------------------------
 // Schemas
@@ -76,8 +77,8 @@ async function handleFloorAction(
   }
 
   // Generate nonce (digits-only, matches relayer /^\d+$/ requirement) and valid_until_ns
-  // Use a combination of timestamp-ns + 6 random decimal digits for uniqueness
-  const randomSuffix = Math.floor(Math.random() * 1_000_000).toString().padStart(6, '0');
+  // Use a combination of timestamp-ns + 6 cryptographically random decimal digits for uniqueness
+  const randomSuffix = randomInt(0, 1_000_000).toString().padStart(6, '0');
   const nonce = (BigInt(Date.now()) * 1_000_000n).toString() + randomSuffix;
   const valid_until_ns = (BigInt(Date.now() + 300_000) * 1_000_000n).toString();
 
@@ -86,7 +87,7 @@ async function handleFloorAction(
     try {
       const relayRes = await fetch(`${relayerUrl}/v1/relay/floor-action`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': nonce },
         body: JSON.stringify({
           floor_id,
           action,

@@ -74,13 +74,22 @@ export default function SetupDefaults({ navigate, className }: Props) {
             <polyline points="12 19 5 12 12 5" />
           </svg>
         </button>
+        <span className="text-base font-extrabold text-[#111]">Floor Defaults</span>
       </div>
 
       <div className="flex flex-col px-6 pt-6 pb-10 gap-7">
+        {/* H4: Loading indicator while fetching suggestions */}
+        {loading && (
+          <div className="flex items-center gap-3 px-1">
+            <span className="w-5 h-5 border-2 border-[#111] border-t-transparent rounded-full animate-spin" />
+            <span className="text-sm font-semibold text-gray-500">Loading suggestions…</span>
+          </div>
+        )}
+
         {/* Title */}
         <div>
           <h1 className="text-3xl font-extrabold text-[#111] leading-tight">
-            🛡 Set Your Floor Defaults
+            Set Your Floor Defaults
           </h1>
           <p className="text-sm font-semibold text-gray-500 mt-1">
             Choose how much protection to apply when you buy.

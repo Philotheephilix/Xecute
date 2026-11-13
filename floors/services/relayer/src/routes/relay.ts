@@ -52,6 +52,22 @@ function hexToBytes(hex: string): Uint8Array {
   return result;
 }
 
+// ---------------------------------------------------------------------------
+// Signing account singleton — created once at startup, reused for all requests.
+// ---------------------------------------------------------------------------
+
+let signingAccountPromise: Promise<Account> | null = null;
+let signingAccountConfig: RelayerConfig | null = null;
+
+function getSigningAccount(config: RelayerConfig): Promise<Account> {
+  // Re-create if config changes (e.g. test suite rebuilds the module).
+  if (!signingAccountPromise || signingAccountConfig !== config) {
+    signingAccountConfig = config;
+    signingAccountPromise = createSigningAccount(config);
+  }
+  return signingAccountPromise;
+}
+
 /**
  * Create a NEAR account handle authenticated with the relayer's signing key.
  */
@@ -113,8 +129,16 @@ export function registerRelayRoutes(
 
     let tx_hash: string;
     try {
-      const signingAccount = await createSigningAccount(config);
-      const outcome = await signingAccount.sendMoney(config.NEAR_ACCOUNT_ID, BigInt(1));
+      const signingAccount = await getSigningAccount(config);
+      // Execute the provided actions as a function call on the target account.
+      // The first action is expected to carry the signed intent payload.
+      const outcome = await signingAccount.functionCall({
+        contractId: account_id,
+        methodName: 'execute',
+        args: { actions },
+        gas: BigInt(100_000_000_000_000), // 100 TGas
+        attachedDeposit: BigInt(0),
+      });
       tx_hash = outcome.transaction_outcome.id;
       logger.info({ tx_hash, account_id, event: 'near_tx_submitted' }, 'NEAR transaction submitted');
     } catch (err) {
@@ -411,7 +435,7 @@ export function registerRelayRoutes(
     // (this is a standard function call — no custom actions needed)
     let tx_hash: string;
     try {
-      const signingAccount = await createSigningAccount(config);
+      const signingAccount = await getSigningAccount(config);
 
       const outcome = await signingAccount.functionCall({
         contractId: account_id,
@@ -476,22 +500,36 @@ export function registerRelayRoutes(
   }
 
   /**
-   * In-memory nonce store for floor-action replay protection.
-   * Maps nonce string → true. TTL handled by valid_until_ns check.
+   * Persist a nonce to Postgres for replay protection.
+   *
+   * Returns true when the nonce was successfully recorded (first use),
+   * false when the nonce already exists (replay attempt → caller should 409).
+   *
+   * Also prunes expired nonces on each call (cheap DELETE; index on expires_at).
    */
-  const seenNonces = new Map<string, true>();
-
-  function checkAndRecordNonce(nonce: string, valid_until_ns: string): void {
+  async function checkAndRecordNonce(nonce: string, valid_until_ns: string): Promise<void> {
     // Check expiry: valid_until_ns is nanoseconds; Date.now() is milliseconds
     const validUntilMs = BigInt(valid_until_ns) / 1_000_000n;
     if (validUntilMs < BigInt(Date.now())) {
       throw new FloorApiError('VALIDATION_ERROR', 'Request has expired (valid_until_ns in the past)', false, 400);
     }
-    // Check replay
-    if (seenNonces.has(nonce)) {
-      throw new FloorApiError('VALIDATION_ERROR', 'Nonce already used', false, 400);
+
+    // Prune expired nonces (best-effort, don't block on error)
+    db`DELETE FROM relayer.floor_action_nonces WHERE expires_at < NOW()`.catch((err: unknown) => {
+      logger.warn({ err, event: 'nonce_prune_error' }, 'Failed to prune expired nonces');
+    });
+
+    // Atomically insert; 0 rows returned means nonce already exists → replay
+    const rows = await db<Array<{ nonce: string }>>`
+      INSERT INTO relayer.floor_action_nonces (nonce, expires_at)
+      VALUES (${nonce}, to_timestamp(${valid_until_ns}::numeric / 1e9))
+      ON CONFLICT (nonce) DO NOTHING
+      RETURNING nonce
+    `;
+
+    if (rows.length === 0) {
+      throw new FloorApiError('VALIDATION_ERROR', 'Nonce already used', false, 409);
     }
-    seenNonces.set(nonce, true);
   }
 
   /**
@@ -523,13 +561,13 @@ export function registerRelayRoutes(
 
     const { account_id, floor_id, action, nonce, valid_until_ns, assertion } = bodyResult.data;
 
-    checkAndRecordNonce(nonce, valid_until_ns);
+    await checkAndRecordNonce(nonce, valid_until_ns);
 
     logger.info({ account_id, floor_id, action, event: 'floor_action_start' }, 'Floor action relay');
 
     let tx_hash: string;
     try {
-      const signingAccount = await createSigningAccount(config);
+      const signingAccount = await getSigningAccount(config);
       const outcome = await signingAccount.functionCall({
         contractId: account_id,
         methodName: 'w_execute_signed',
@@ -561,6 +599,8 @@ export function registerRelayRoutes(
   });
 
   app.post('/v1/relay/expire-floor', async (request, reply) => {
+    assertBotAuth(request);
+
     const bodyResult = ExpireFloorBodySchema.safeParse(request.body);
     if (!bodyResult.success) {
       throw new FloorApiError('VALIDATION_ERROR', 'Invalid expire-floor request', false, 400, { issues: bodyResult.error.issues });
@@ -573,7 +613,7 @@ export function registerRelayRoutes(
 
     let tx_hash: string;
     try {
-      const signingAccount = await createSigningAccount(config);
+      const signingAccount = await getSigningAccount(config);
       const outcome = await signingAccount.functionCall({
         contractId: floorsContract,
         methodName: 'expire',
@@ -602,6 +642,8 @@ export function registerRelayRoutes(
   });
 
   app.post('/v1/relay/expire-floors-batch', async (request, reply) => {
+    assertBotAuth(request);
+
     const bodyResult = ExpireFloorsBatchBodySchema.safeParse(request.body);
     if (!bodyResult.success) {
       throw new FloorApiError('VALIDATION_ERROR', 'Invalid expire-floors-batch request', false, 400, { issues: bodyResult.error.issues });
@@ -616,7 +658,7 @@ export function registerRelayRoutes(
 
     for (const floor_id of floor_ids) {
       try {
-        const signingAccount = await createSigningAccount(config);
+        const signingAccount = await getSigningAccount(config);
         const outcome = await signingAccount.functionCall({
           contractId: floorsContract,
           methodName: 'expire',
@@ -658,7 +700,7 @@ export function registerRelayRoutes(
 
     let tx_hash: string;
     try {
-      const signingAccount = await createSigningAccount(config);
+      const signingAccount = await getSigningAccount(config);
       const outcome = await signingAccount.functionCall({
         contractId: floorsContract,
         methodName: 'reconcile',
@@ -701,7 +743,7 @@ export function registerRelayRoutes(
 
     let tx_hash: string;
     try {
-      const signingAccount = await createSigningAccount(config);
+      const signingAccount = await getSigningAccount(config);
       const outcome = await signingAccount.functionCall({
         contractId: floorsContract,
         methodName: 'auto_protect',
@@ -747,7 +789,7 @@ export function registerRelayRoutes(
 
     let tx_hash: string;
     try {
-      const signingAccount = await createSigningAccount(config);
+      const signingAccount = await getSigningAccount(config);
       const outcome = await signingAccount.functionCall({
         contractId: floorsContract,
         methodName: 'unwind_start',
@@ -795,7 +837,7 @@ export function registerRelayRoutes(
 
     let tx_hash: string;
     try {
-      const signingAccount = await createSigningAccount(config);
+      const signingAccount = await getSigningAccount(config);
       const outcome = await signingAccount.functionCall({
         contractId: floorsContract,
         methodName: 'unwind_settle',

@@ -99,6 +99,7 @@ test.describe('floor-quote: POST /v1/quotes with floor params', () => {
         qty: '1000000000000000000', // 1 ETH in wei
         floor_bps: 500,
         duration_secs: 86400,
+        account_id: `test-${Date.now()}`,
       }),
     });
 
