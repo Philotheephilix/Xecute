@@ -19,6 +19,8 @@ pub trait Intents {
         approval: Option<(AccountId, u64)>,
         memo: Option<String>,
     );
+
+    fn mt_balance_of(&self, account_id: AccountId, token_id: String) -> U128;
 }
 
 #[near_sdk::ext_contract(ext_floors_self)]
@@ -43,6 +45,12 @@ pub trait FloorsSelf {
         &mut self,
         floor_id: u64,
         payout_usdc: U128,
+    );
+    fn on_withdraw_credit_result(
+        &mut self,
+        owner: AccountId,
+        asset: String,
+        amount: U128,
     );
 }
 

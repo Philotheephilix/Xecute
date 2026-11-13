@@ -1,7 +1,7 @@
 import { createLogger, createApp, createDb, runMigrations, initTracing, loadConfig } from '@floors/shared-server';
 import { z } from 'zod';
 import { BaseConfigSchema } from '@floors/shared-server';
-import { registerRelayRoutes } from './routes/relay.js';
+import { registerRelayRoutes, createSigningAccount } from './routes/relay.js';
 import { registerSwapRoutes } from './routes/swap.js';
 import { fileURLToPath } from 'node:url';
 import { join, dirname } from 'node:path';
@@ -60,3 +60,34 @@ try {
   logger.error({ err, event: 'server_start_failed' }, 'Failed to start server');
   process.exit(1);
 }
+
+// ---------------------------------------------------------------------------
+// Background reconcile loop: fire-and-forget, every 5 minutes per major asset
+// ---------------------------------------------------------------------------
+
+const RECONCILE_ASSETS = [
+  'nep141:eth.omft.near',
+  'nep141:sol.omft.near',
+  'nep141:starknet.omft.near',
+];
+
+setInterval(async () => {
+  for (const asset of RECONCILE_ASSETS) {
+    try {
+      const signingAccount = await createSigningAccount(config);
+      const outcome = await signingAccount.functionCall({
+        contractId: config.FLOORS_CONTRACT,
+        methodName: 'reconcile',
+        args: { asset },
+        gas: BigInt(30_000_000_000_000), // 30 TGas
+        attachedDeposit: BigInt(0),
+      });
+      logger.info(
+        { asset, tx_hash: outcome.transaction_outcome.id, event: 'reconcile_loop_done' },
+        'Reconcile loop submitted',
+      );
+    } catch (e) {
+      logger.error({ err: e, asset, event: 'reconcile_loop_error' }, 'reconcile loop error');
+    }
+  }
+}, 5 * 60 * 1000);

@@ -3,6 +3,7 @@ use near_sdk::{near, AccountId, BorshStorageKey, PanicOnDefault};
 
 mod admin;
 mod assets;
+mod bot_methods;
 mod errors;
 mod events;
 mod floors;
@@ -11,6 +12,7 @@ mod migrate;
 mod payouts;
 mod quotes;
 mod receivers;
+mod receivers_auth;
 mod sleeves;
 mod state;
 mod views;
@@ -530,5 +532,227 @@ mod tests {
         // Confirm sizes
         assert_eq!(pubkey_bytes.len(), 32);
         assert_eq!(sig_bytes.len(), 64);
+    }
+
+    // -------------------------------------------------------------------------
+    // on_auth tests
+    // -------------------------------------------------------------------------
+
+    fn on_auth_contract() -> Contract {
+        let mut contract = test_contract();
+        // Add an asset config so on_auth_sell can compute payout
+        let asset_cfg = AssetConfig {
+            decimals: 18,
+            min_qty: 1,
+            max_qty: u128::MAX,
+            max_open_floors: 100,
+            pyth_price_id: [0u8; 32],
+            allowed_products: vec![],
+            max_open_floor_usdc: u128::MAX,
+            paused: false,
+        };
+        contract.params.assets.insert("nep141:eth.omft.near".to_string(), asset_cfg);
+        contract
+    }
+
+    #[test]
+    #[should_panic(expected = "E_NOT_INTENTS")]
+    fn test_on_auth_requires_intents_predecessor() {
+        let mut contract = on_auth_contract();
+        let ctx = VMContextBuilder::new()
+            .predecessor_account_id(user()) // not intents
+            .build();
+        testing_env!(ctx);
+        contract.on_auth(user(), r#"{"op":"close","floor_id":0}"#.to_string());
+    }
+
+    #[test]
+    #[should_panic(expected = "E_NOT_FLOOR_OWNER")]
+    fn test_on_auth_sell_wrong_owner() {
+        let mut contract = on_auth_contract();
+
+        // Insert a floor owned by user()
+        let floor_id = insert_test_floor(&mut contract, 9_999_999_999_999_999_999);
+
+        let ctx = VMContextBuilder::new()
+            .predecessor_account_id(intents())
+            .block_timestamp(1_000)
+            .build();
+        testing_env!(ctx);
+
+        let other: AccountId = accounts(4);
+        contract.on_auth(other, format!(r#"{{"op":"sell_to_floor","floor_id":{}}}"#, floor_id));
+    }
+
+    #[test]
+    #[should_panic(expected = "E_NOT_FLOOR_OWNER")]
+    fn test_on_auth_close_wrong_owner() {
+        let mut contract = on_auth_contract();
+        let floor_id = insert_test_floor(&mut contract, 9_999_999_999_999_999_999);
+
+        let ctx = VMContextBuilder::new()
+            .predecessor_account_id(intents())
+            .block_timestamp(1_000)
+            .build();
+        testing_env!(ctx);
+
+        let other: AccountId = accounts(4);
+        contract.on_auth(other, format!(r#"{{"op":"close","floor_id":{}}}"#, floor_id));
+    }
+
+    #[test]
+    #[should_panic(expected = "E_NO_CREDIT")]
+    fn test_on_auth_withdraw_credit_none() {
+        let mut contract = on_auth_contract();
+
+        let ctx = VMContextBuilder::new()
+            .predecessor_account_id(intents())
+            .build();
+        testing_env!(ctx);
+
+        contract.on_auth(
+            user(),
+            r#"{"op":"withdraw_credit","asset":"nep141:usdc"}"#.to_string(),
+        );
+    }
+
+    #[test]
+    fn test_on_auth_withdraw_credit_ok() {
+        let mut contract = on_auth_contract();
+
+        let asset = "nep141:usdc".to_string();
+        let credit_key = (user(), asset.clone());
+        contract.credits.insert(credit_key, 500_000);
+        {
+            let t = contract.totals.entry(asset.clone()).or_insert_with(Totals::default);
+            t.credits += 500_000;
+            t.held += 500_000;
+        }
+
+        let ctx = VMContextBuilder::new()
+            .predecessor_account_id(intents())
+            .build();
+        testing_env!(ctx);
+
+        // This will initiate a cross-contract call; in unit test context it panics
+        // on the Promise execution but we can verify state changes made synchronously.
+        // We catch the Promise to verify state was updated before the call.
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            contract.on_auth(
+                user(),
+                r#"{"op":"withdraw_credit","asset":"nep141:usdc"}"#.to_string(),
+            );
+        }));
+
+        // The credit should have been removed (checked before the Promise call)
+        let remaining = contract.credits.get(&(user(), asset.clone())).copied().unwrap_or(0);
+        assert_eq!(remaining, 0, "credit should be cleared");
+    }
+
+    #[test]
+    #[should_panic(expected = "E_BAD_MSG")]
+    fn test_on_auth_unknown_op() {
+        let mut contract = on_auth_contract();
+        let ctx = VMContextBuilder::new()
+            .predecessor_account_id(intents())
+            .build();
+        testing_env!(ctx);
+        contract.on_auth(user(), r#"{"op":"unknown_op"}"#.to_string());
+    }
+
+    // -------------------------------------------------------------------------
+    // View method tests
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_get_params_view() {
+        let contract = test_contract();
+        let view = contract.get_params();
+        assert_eq!(view.intents, intents().to_string());
+        assert_eq!(view.pyth, pyth().to_string());
+        assert_eq!(view.platform_fee_bps, 417);
+        assert_eq!(view.min_floor_usdc, "10000000");
+    }
+
+    #[test]
+    fn test_get_roles_view() {
+        let contract = test_contract();
+        let view = contract.get_roles();
+        assert_eq!(view.owner, owner().to_string());
+        assert_eq!(view.guardian, guardian().to_string());
+        assert!(view.admins.is_empty());
+        // quote_signer_keys: key "0" maps to [0u8;32] (all zeros → 64-char hex string of zeros)
+        let hex_zeros = "0".repeat(64);
+        assert_eq!(view.quote_signer_keys.get("0").unwrap(), &hex_zeros);
+    }
+
+    #[test]
+    fn test_get_pause_view() {
+        let contract = test_contract();
+        let view = contract.get_pause();
+        assert!(!view.global);
+        assert!(!view.open_floors);
+        assert!(!view.close_floors);
+        assert!(!view.sell_to_floor);
+        assert!(!view.unwind);
+    }
+
+    #[test]
+    fn test_get_capacity_returns_none_missing_sleeve() {
+        let contract = test_contract();
+        assert!(contract.get_capacity("nep141:eth".to_string(), "majors".to_string()).is_none());
+    }
+
+    #[test]
+    fn test_get_capacity_returns_free_usdc() {
+        let mut contract = test_contract();
+        let mut sleeve = Sleeve::new("majors".to_string());
+        sleeve.free_usdc = 5_000_000;
+        contract.sleeves.insert("majors".to_string(), sleeve);
+        let cap = contract.get_capacity("nep141:eth".to_string(), "majors".to_string());
+        assert_eq!(cap, Some("5000000".to_string()));
+    }
+
+    #[test]
+    fn test_get_unwinds_empty() {
+        let contract = test_contract();
+        let unwinds = contract.get_unwinds(None, None);
+        assert!(unwinds.is_empty());
+    }
+
+    #[test]
+    fn test_get_unwinds_paginated() {
+        use crate::state::Unwind;
+        let mut contract = test_contract();
+        for i in 0u64..5 {
+            contract.unwinds.insert(i, Unwind {
+                id: i,
+                asset: "nep141:eth".to_string(),
+                qty: 1_000_000,
+                deposit_account: intents(),
+                min_usdc_out: 950_000,
+                started_ns: i * 1_000_000,
+                status: crate::state::UnwindStatus::Pending,
+            });
+        }
+        let page = contract.get_unwinds(Some(1), Some(2));
+        assert_eq!(page.len(), 2);
+        assert_eq!(page[0].id, "1");
+        assert_eq!(page[1].id, "2");
+    }
+
+    #[test]
+    fn test_get_credit_none_returns_zero() {
+        let contract = test_contract();
+        let result = contract.get_credit(user(), "nep141:usdc".to_string());
+        assert_eq!(result, "0");
+    }
+
+    #[test]
+    fn test_get_credit_returns_value() {
+        let mut contract = test_contract();
+        contract.credits.insert((user(), "nep141:usdc".to_string()), 12_345_678);
+        let result = contract.get_credit(user(), "nep141:usdc".to_string());
+        assert_eq!(result, "12345678");
     }
 }

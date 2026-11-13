@@ -55,7 +55,7 @@ function hexToBytes(hex: string): Uint8Array {
 /**
  * Create a NEAR account handle authenticated with the relayer's signing key.
  */
-async function createSigningAccount(config: RelayerConfig): Promise<Account> {
+export async function createSigningAccount(config: RelayerConfig): Promise<Account> {
   const keyStore = new keyStores.InMemoryKeyStore();
   const keyPair = KeyPair.fromString(
     config.NEAR_PRIVATE_KEY as Parameters<typeof KeyPair.fromString>[0],
@@ -604,16 +604,174 @@ export function registerRelayRoutes(
   });
 
   /**
-   * POST /v1/relay/reconcile — not yet implemented
+   * POST /v1/relay/reconcile
+   *
+   * Calls `reconcile({ asset })` on the floors contract to rebalance a given asset.
    */
-  app.post('/v1/relay/reconcile', async (_request, reply) => {
-    return reply.status(501).send({ code: 'NOT_IMPLEMENTED', message: 'reconcile not yet implemented' });
+  const ReconcileBodySchema = z.object({
+    asset: z.string().regex(/^nep141:[a-z0-9_\-\.]{2,64}$/, 'must be a nep141: asset id'),
+  });
+
+  app.post('/v1/relay/reconcile', async (request, reply) => {
+    const bodyResult = ReconcileBodySchema.safeParse(request.body);
+    if (!bodyResult.success) {
+      throw new FloorApiError('VALIDATION_ERROR', 'Invalid reconcile request', false, 400, { issues: bodyResult.error.issues });
+    }
+
+    const { asset } = bodyResult.data;
+    const floorsContract = config.FLOORS_CONTRACT;
+
+    logger.info({ asset, floorsContract, event: 'reconcile_start' }, 'Reconcile asset');
+
+    let tx_hash: string;
+    try {
+      const signingAccount = await createSigningAccount(config);
+      const outcome = await signingAccount.functionCall({
+        contractId: floorsContract,
+        methodName: 'reconcile',
+        args: { asset },
+        gas: BigInt(30_000_000_000_000), // 30 TGas
+        attachedDeposit: BigInt(0),
+      });
+      tx_hash = outcome.transaction_outcome.id;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.error({ err, asset, event: 'reconcile_error' }, 'reconcile call failed');
+      throw new FloorApiError('RELAYER_ERROR', `NEAR RPC failed: ${msg}`, true, 502);
+    }
+
+    logger.info({ tx_hash, asset, event: 'reconcile_done' }, 'Reconcile submitted');
+    return reply.status(200).send({ tx_hash, status: 'submitted' });
   });
 
   /**
-   * POST /v1/relay/auto-protect — not yet implemented
+   * POST /v1/relay/auto-protect
+   *
+   * Calls `auto_protect({ floor_id })` on the floors contract.
    */
-  app.post('/v1/relay/auto-protect', async (_request, reply) => {
-    return reply.status(501).send({ code: 'NOT_IMPLEMENTED', message: 'auto-protect not yet implemented' });
+  const AutoProtectBodySchema = z.object({
+    floor_id: z.number().int().nonnegative(),
+  });
+
+  app.post('/v1/relay/auto-protect', async (request, reply) => {
+    const bodyResult = AutoProtectBodySchema.safeParse(request.body);
+    if (!bodyResult.success) {
+      throw new FloorApiError('VALIDATION_ERROR', 'Invalid auto-protect request', false, 400, { issues: bodyResult.error.issues });
+    }
+
+    const { floor_id } = bodyResult.data;
+    const floorsContract = config.FLOORS_CONTRACT;
+
+    logger.info({ floor_id, floorsContract, event: 'auto_protect_start' }, 'Auto-protect floor');
+
+    let tx_hash: string;
+    try {
+      const signingAccount = await createSigningAccount(config);
+      const outcome = await signingAccount.functionCall({
+        contractId: floorsContract,
+        methodName: 'auto_protect',
+        args: { floor_id },
+        gas: BigInt(60_000_000_000_000), // 60 TGas
+        attachedDeposit: BigInt(0),
+      });
+      tx_hash = outcome.transaction_outcome.id;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.error({ err, floor_id, event: 'auto_protect_error' }, 'auto_protect call failed');
+      throw new FloorApiError('RELAYER_ERROR', `NEAR RPC failed: ${msg}`, true, 502);
+    }
+
+    logger.info({ tx_hash, floor_id, event: 'auto_protect_done' }, 'Auto-protect submitted');
+    return reply.status(200).send({ tx_hash, status: 'submitted' });
+  });
+
+  /**
+   * POST /v1/relay/unwind-start
+   *
+   * Calls `unwind_start({ asset, qty, deposit_account, min_usdc_out })` on the floors contract.
+   */
+  const UnwindStartBodySchema = z.object({
+    asset: z.string().regex(/^nep141:[a-z0-9_\-\.]{2,64}$/, 'must be a nep141: asset id'),
+    qty: z.string().min(1),
+    deposit_account: z.string().regex(/^[a-z0-9_\-\.]{2,64}$/, 'must be a valid NEAR account id'),
+    min_usdc_out: z.string().min(1),
+  });
+
+  app.post('/v1/relay/unwind-start', async (request, reply) => {
+    const bodyResult = UnwindStartBodySchema.safeParse(request.body);
+    if (!bodyResult.success) {
+      throw new FloorApiError('VALIDATION_ERROR', 'Invalid unwind-start request', false, 400, { issues: bodyResult.error.issues });
+    }
+
+    const { asset, qty, deposit_account, min_usdc_out } = bodyResult.data;
+    const floorsContract = config.FLOORS_CONTRACT;
+
+    logger.info({ asset, qty, deposit_account, event: 'unwind_start_start' }, 'Unwind start');
+
+    let tx_hash: string;
+    try {
+      const signingAccount = await createSigningAccount(config);
+      const outcome = await signingAccount.functionCall({
+        contractId: floorsContract,
+        methodName: 'unwind_start',
+        args: {
+          asset,
+          qty: qty.toString(),
+          deposit_account,
+          min_usdc_out: min_usdc_out.toString(),
+        },
+        gas: BigInt(40_000_000_000_000), // 40 TGas
+        attachedDeposit: BigInt(0),
+      });
+      tx_hash = outcome.transaction_outcome.id;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.error({ err, asset, event: 'unwind_start_error' }, 'unwind_start call failed');
+      throw new FloorApiError('RELAYER_ERROR', `NEAR RPC failed: ${msg}`, true, 502);
+    }
+
+    logger.info({ tx_hash, asset, event: 'unwind_start_done' }, 'Unwind start submitted');
+    return reply.status(200).send({ tx_hash });
+  });
+
+  /**
+   * POST /v1/relay/unwind-settle
+   *
+   * Calls `unwind_settle({ unwind_id })` on the floors contract.
+   */
+  const UnwindSettleBodySchema = z.object({
+    unwind_id: z.number().int().nonnegative(),
+  });
+
+  app.post('/v1/relay/unwind-settle', async (request, reply) => {
+    const bodyResult = UnwindSettleBodySchema.safeParse(request.body);
+    if (!bodyResult.success) {
+      throw new FloorApiError('VALIDATION_ERROR', 'Invalid unwind-settle request', false, 400, { issues: bodyResult.error.issues });
+    }
+
+    const { unwind_id } = bodyResult.data;
+    const floorsContract = config.FLOORS_CONTRACT;
+
+    logger.info({ unwind_id, floorsContract, event: 'unwind_settle_start' }, 'Unwind settle');
+
+    let tx_hash: string;
+    try {
+      const signingAccount = await createSigningAccount(config);
+      const outcome = await signingAccount.functionCall({
+        contractId: floorsContract,
+        methodName: 'unwind_settle',
+        args: { unwind_id },
+        gas: BigInt(40_000_000_000_000), // 40 TGas
+        attachedDeposit: BigInt(0),
+      });
+      tx_hash = outcome.transaction_outcome.id;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.error({ err, unwind_id, event: 'unwind_settle_error' }, 'unwind_settle call failed');
+      throw new FloorApiError('RELAYER_ERROR', `NEAR RPC failed: ${msg}`, true, 502);
+    }
+
+    logger.info({ tx_hash, unwind_id, event: 'unwind_settle_done' }, 'Unwind settle submitted');
+    return reply.status(200).send({ tx_hash });
   });
 }

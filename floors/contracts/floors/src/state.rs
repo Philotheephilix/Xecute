@@ -227,12 +227,23 @@ impl Sleeve {
 }
 
 #[near(serializers = [borsh, json])]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum UnwindStatus {
+    Pending,
+    Settled,
+    Short,
+}
+
+#[near(serializers = [borsh, json])]
 #[derive(Debug, Clone)]
 pub struct Unwind {
     pub id: u64,
     pub asset: String,
     pub qty: u128,
+    pub deposit_account: AccountId,
+    pub min_usdc_out: u128,
     pub started_ns: u64,
+    pub status: UnwindStatus,
 }
 
 #[near(serializers = [borsh, json])]

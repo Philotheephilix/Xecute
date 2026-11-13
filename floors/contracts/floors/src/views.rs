@@ -2,6 +2,53 @@ use crate::{Contract, ContractExt};
 use near_sdk::{near, AccountId};
 use serde::Serialize;
 
+/// JSON-friendly view of Params.
+#[derive(Serialize)]
+pub struct ParamsView {
+    pub intents: String,
+    pub pyth: String,
+    pub usdc: String,
+    pub platform_fee_bps: u16,
+    pub platform_account: String,
+    pub pyth_max_age_secs: u32,
+    pub pyth_tolerance_bps: u16,
+    pub quote_ttl_max_secs: u32,
+    pub min_floor_usdc: String,
+}
+
+/// JSON-friendly view of Roles.
+#[derive(Serialize)]
+pub struct RolesView {
+    pub owner: String,
+    pub guardian: String,
+    pub admins: Vec<String>,
+    pub quote_signer_keys: std::collections::HashMap<String, String>,
+    pub auto_protect_bot: Option<String>,
+    pub unwind_bot: Option<String>,
+}
+
+/// JSON-friendly view of PauseFlags.
+#[derive(Serialize)]
+pub struct PauseView {
+    pub global: bool,
+    pub open_floors: bool,
+    pub close_floors: bool,
+    pub sell_to_floor: bool,
+    pub unwind: bool,
+}
+
+/// JSON-friendly view of an Unwind.
+#[derive(Serialize)]
+pub struct UnwindView {
+    pub id: String,
+    pub asset: String,
+    pub qty: String,
+    pub deposit_account: String,
+    pub min_usdc_out: String,
+    pub started_ns: String,
+    pub status: String,
+}
+
 /// JSON-friendly view of a Floor (no non-serializable types).
 #[derive(Serialize)]
 pub struct FloorView {
@@ -101,5 +148,85 @@ impl Contract {
             free_usdc: s.free_usdc.to_string(),
             reserved_usdc: s.reserved_usdc.to_string(),
         })
+    }
+
+    /// Get contract params.
+    pub fn get_params(&self) -> ParamsView {
+        ParamsView {
+            intents: self.params.intents.to_string(),
+            pyth: self.params.pyth.to_string(),
+            usdc: self.params.usdc.clone(),
+            platform_fee_bps: self.params.platform_fee_bps,
+            platform_account: self.params.platform_account.to_string(),
+            pyth_max_age_secs: self.params.pyth_max_age_secs,
+            pyth_tolerance_bps: self.params.pyth_tolerance_bps,
+            quote_ttl_max_secs: self.params.quote_ttl_max_secs,
+            min_floor_usdc: self.params.min_floor_usdc.to_string(),
+        }
+    }
+
+    /// Get roles.
+    pub fn get_roles(&self) -> RolesView {
+        let quote_signer_keys = self.roles.quote_signer_keys
+            .iter()
+            .map(|(k, v)| {
+                let hex = v.iter().map(|b| format!("{:02x}", b)).collect::<String>();
+                (k.clone(), hex)
+            })
+            .collect();
+        RolesView {
+            owner: self.roles.owner.to_string(),
+            guardian: self.roles.guardian.to_string(),
+            admins: self.roles.admins.iter().map(|a| a.to_string()).collect(),
+            quote_signer_keys,
+            auto_protect_bot: self.roles.auto_protect_bot.as_ref().map(|a| a.to_string()),
+            unwind_bot: self.roles.unwind_bot.as_ref().map(|a| a.to_string()),
+        }
+    }
+
+    /// Get pause flags.
+    pub fn get_pause(&self) -> PauseView {
+        PauseView {
+            global: self.pause.global,
+            open_floors: self.pause.buy,
+            close_floors: self.pause.close,
+            sell_to_floor: self.pause.sell_to_floor,
+            unwind: self.pause.unwind,
+        }
+    }
+
+    /// Get available USDC capacity for an asset/sleeve combination.
+    /// Returns sleeve.free_usdc as a string, or None if sleeve not found.
+    pub fn get_capacity(&self, _asset: String, sleeve_id: String) -> Option<String> {
+        self.sleeves.get(&sleeve_id).map(|s| s.free_usdc.to_string())
+    }
+
+    /// Paginated list of unwinds.
+    pub fn get_unwinds(&self, from_index: Option<u64>, limit: Option<u64>) -> Vec<UnwindView> {
+        let from = from_index.unwrap_or(0) as usize;
+        let lim = limit.unwrap_or(50) as usize;
+        self.unwinds
+            .iter()
+            .skip(from)
+            .take(lim)
+            .map(|(_id, u)| UnwindView {
+                id: u.id.to_string(),
+                asset: u.asset.clone(),
+                qty: u.qty.to_string(),
+                deposit_account: u.deposit_account.to_string(),
+                min_usdc_out: u.min_usdc_out.to_string(),
+                started_ns: u.started_ns.to_string(),
+                status: format!("{:?}", u.status),
+            })
+            .collect()
+    }
+
+    /// Get credit balance for (owner, asset). Returns "0" if none.
+    pub fn get_credit(&self, owner: AccountId, asset: String) -> String {
+        self.credits
+            .get(&(owner, asset))
+            .copied()
+            .unwrap_or(0)
+            .to_string()
     }
 }

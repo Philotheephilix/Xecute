@@ -238,6 +238,18 @@ impl Contract {
         self.assert_owner();
         self.roles.admins.retain(|a| a != &account_id);
     }
+
+    /// Set the auto_protect_bot account. Pass None to clear. Owner or admin only.
+    pub fn set_auto_protect_bot(&mut self, account: Option<AccountId>) {
+        self.assert_admin();
+        self.roles.auto_protect_bot = account;
+    }
+
+    /// Set the unwind_bot account. Pass None to clear. Owner or admin only.
+    pub fn set_unwind_bot(&mut self, account: Option<AccountId>) {
+        self.assert_admin();
+        self.roles.unwind_bot = account;
+    }
 }
 
 // ---------------------------------------------------------------------------
