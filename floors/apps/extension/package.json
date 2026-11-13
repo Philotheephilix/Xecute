@@ -7,7 +7,7 @@
     "dev": "wxt",
     "build": "wxt build",
     "test": "vitest run",
-    "e2e": "playwright test"
+    "e2e": "PW_DISABLE_TS_ESM=1 playwright test"
   },
   "dependencies": {
     "wxt": "0.20.6",
