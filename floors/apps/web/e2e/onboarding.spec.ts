@@ -129,38 +129,46 @@ test(
 
     if (isEnableBtnVisible) {
       await enableBtn.click();
-      // Wait for either fund screen or skip-for-now
-      // The app will either succeed and navigate to fund, or show an error state.
-      // We allow up to 15s for the assertion + relayer call.
-      await Promise.race([
-        expect(page.getByText('Fund Account')).toBeVisible({ timeout: 15_000 }),
-        expect(page.getByRole('button', { name: 'Skip for now' })).toBeVisible({ timeout: 15_000 }),
-      ]).catch(async () => {
-        // If neither appeared, try clicking "Skip for now" if it exists
+      // Wait for the app to leave enable-trading: it will show either:
+      //   (a) "Fund Account" (success path)
+      //   (b) "Set Your Floor Defaults" (P2 setup-defaults path)
+      //   (c) "Skip for now" button (error / relayer not implemented)
+      // We wait up to 15s then navigate forward regardless.
+      await page.waitForTimeout(1_000); // let the async call fire
+    } else {
+      // Button label already changed — fall through
+    }
+
+    // ── Step 7b: Navigate forward through any intermediate screens ───────────
+    // Handle: enable-trading error / setup-defaults / already on fund
+    // Poll up to 15s, clicking "Skip for now" / "Save & Continue" as needed.
+    for (let i = 0; i < 30; i++) {
+      const isOnFund = await page.getByText('Fund Account').isVisible().catch(() => false);
+      if (isOnFund) break;
+
+      // On setup-defaults — click skip to proceed to fund
+      const isOnDefaults = await page.getByText('Set Your Floor Defaults').isVisible().catch(() => false);
+      if (isOnDefaults) {
         const skipBtn = page.getByRole('button', { name: 'Skip for now' });
         if (await skipBtn.isVisible().catch(() => false)) {
           await skipBtn.click();
+          await page.waitForTimeout(500);
+          continue;
         }
-      });
-    } else {
-      // Button label already changed — use skip
+      }
+
+      // On enable-trading (error state or normal) — click "Skip for now"
       const skipBtn = page.getByRole('button', { name: 'Skip for now' });
       if (await skipBtn.isVisible().catch(() => false)) {
         await skipBtn.click();
+        await page.waitForTimeout(500);
+        continue;
       }
+
+      await page.waitForTimeout(500);
     }
 
     // ── Step 8: Fund screen ────────────────────────────────────────────────────
-    // Ensure fund screen is visible (either from enable-trading success or skip)
-    // Navigate there directly if we're still on enable-trading
-    const fundHeaderVisible = await page.getByText('Fund Account').isVisible().catch(() => false);
-    if (!fundHeaderVisible) {
-      // Still on enable-trading — navigate via "Skip for now"
-      const skipBtn = page.getByRole('button', { name: 'Skip for now' });
-      if (await skipBtn.isVisible().catch(() => false)) {
-        await skipBtn.click();
-      }
-    }
     await expect(page.getByText('Fund Account')).toBeVisible({ timeout: 10_000 });
 
     // ── Step 9: At least one chain / deposit address is shown ─────────────────

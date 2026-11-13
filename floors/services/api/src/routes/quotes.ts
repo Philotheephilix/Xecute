@@ -114,7 +114,7 @@ const DraftQuoteQuerySchema = z.object({
 const QuoteRequestSchema = z.object({
   asset: z.string().min(1),
   qty: z.string().min(1),
-  account_id: z.string().min(1),
+  account_id: z.string().min(1).optional(),
   /** Optional floor parameters — if omitted, no floor quote is requested */
   floor: z.object({
     bps: z.number().int().min(100).max(5000),
@@ -262,7 +262,22 @@ export function registerQuoteRoutes(app: FastifyInstance, riskUrl: string): void
     // Determine floor params — support both nested `floor` object and legacy flat fields
     const floorBps = floor?.bps ?? bodyResult.data.floor_bps;
     const floorDurationSecs = floor?.duration_secs ?? bodyResult.data.duration_secs;
-    const wantsFloor = floor !== undefined || (floorBps !== undefined && floorDurationSecs !== undefined);
+    const hasFloorBps = floorBps !== undefined;
+    const hasFloorDuration = floorDurationSecs !== undefined;
+    const wantsFloor = floor !== undefined || (hasFloorBps && hasFloorDuration);
+
+    // If only one of floor_bps / duration_secs is provided (but not the other), reject
+    if (hasFloorBps !== hasFloorDuration && floor === undefined) {
+      throw new FloorApiError(
+        'VALIDATION_ERROR',
+        hasFloorBps
+          ? 'duration_secs is required when floor_bps is provided'
+          : 'floor_bps is required when duration_secs is provided',
+        false,
+        400,
+        { issues: [{ path: [hasFloorBps ? 'duration_secs' : 'floor_bps'], message: 'Required' }] },
+      );
+    }
 
     request.log.info({ asset, quote_id, wants_floor: wantsFloor }, 'quote_requested');
 
@@ -282,7 +297,7 @@ export function registerQuoteRoutes(app: FastifyInstance, riskUrl: string): void
           qty,
           floor_bps: floorBps,
           duration_secs: floorDurationSecs,
-          owner: account_id,
+          owner: account_id ?? 'anonymous',
         }),
         signal: AbortSignal.timeout(10_000),
       });
@@ -301,7 +316,7 @@ export function registerQuoteRoutes(app: FastifyInstance, riskUrl: string): void
       const riskData = await riskResp.json() as Record<string, unknown>;
 
       floorQuote = {
-        quote_id: riskData['quote_id'],
+        id: riskData['quote_id'],
         floor_price_e6: riskData['floor_price_e6'],
         fee_usdc: riskData['fee_usdc'],
         sleeve: riskData['sleeve'],
@@ -312,6 +327,8 @@ export function registerQuoteRoutes(app: FastifyInstance, riskUrl: string): void
           : undefined,
         floor_bps: floorBps,
         duration_secs: floorDurationSecs,
+        asset,
+        qty,
       };
     } catch (err) {
       if (err instanceof FloorApiError) throw err;
@@ -327,7 +344,9 @@ export function registerQuoteRoutes(app: FastifyInstance, riskUrl: string): void
 
     request.log.info({ asset, quote_id, floor_bps: floorBps }, 'floor_quote_generated');
 
-    return reply.status(200).send({ quote_id, asset, qty, floor: floorQuote });
+    // Extract sig from floor quote for top-level response shape
+    const { sig: floorSig, ...quoteBody } = floorQuote as Record<string, unknown>;
+    return reply.status(200).send({ quote_id, quote: quoteBody, sig: floorSig });
   });
 }
 

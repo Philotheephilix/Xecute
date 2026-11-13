@@ -66,15 +66,60 @@ interface PythPrice {
   publishTime: number;
 }
 
+/** CoinGecko asset IDs for fallback pricing */
+const COINGECKO_IDS: Record<string, string> = {
+  ETH: 'ethereum',
+  SOL: 'solana',
+  STRK: 'starknet',
+};
+
+async function fetchPriceFromCoinGecko(asset: string): Promise<PythPrice> {
+  const cgId = COINGECKO_IDS[asset];
+  if (!cgId) throw new FloorApiError('ASSET_NOT_SUPPORTED', `No CoinGecko ID for ${asset}`, false, 400);
+
+  const url = `https://api.coingecko.com/api/v3/simple/price?ids=${cgId}&vs_currencies=usd`;
+  const resp = await fetch(url, {
+    headers: { Accept: 'application/json' },
+    signal: AbortSignal.timeout(8_000),
+  });
+  if (!resp.ok) {
+    throw new FloorApiError('INTERNAL_ERROR', `CoinGecko returned ${resp.status}`, true, 503);
+  }
+  const body = (await resp.json()) as Record<string, { usd: number }>;
+  const price = body[cgId]?.usd;
+  if (!price || price <= 0) {
+    throw new FloorApiError('INTERNAL_ERROR', 'No CoinGecko price data', true, 503);
+  }
+  // Return in Pyth-compatible format; publishTime = now (always fresh from CoinGecko)
+  return {
+    price,
+    conf: price * 0.001, // 0.1% confidence estimate
+    exponent: 0,
+    publishTime: Math.floor(Date.now() / 1000),
+  };
+}
+
 async function fetchPythPrice(asset: string): Promise<PythPrice> {
   const feedId = PYTH_FEED_IDS[asset];
   if (!feedId) throw new FloorApiError('ASSET_NOT_SUPPORTED', `No Pyth feed for ${asset}`, false, 400);
 
+  const pythApiKey = process.env['PYTH_API_KEY'];
+  const headers: Record<string, string> = { Accept: 'application/json' };
+  if (pythApiKey) {
+    headers['X-Pyth-API-Key'] = pythApiKey;
+  }
+
   const url = `https://hermes.pyth.network/v2/updates/price/latest?ids[]=${feedId}`;
   const resp = await fetch(url, {
-    headers: { Accept: 'application/json' },
+    headers,
     signal: AbortSignal.timeout(5_000),
   });
+
+  // If Pyth requires auth and we don't have a key, fall back to CoinGecko
+  if (resp.status === 401 || resp.status === 403) {
+    return fetchPriceFromCoinGecko(asset);
+  }
+
   if (!resp.ok) {
     throw new FloorApiError('INTERNAL_ERROR', `Pyth returned ${resp.status}`, true, 503);
   }
