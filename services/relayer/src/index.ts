@@ -2,6 +2,7 @@ import { createLogger, createApp, createDb, runMigrations, initTracing, loadConf
 import { z } from 'zod';
 import { BaseConfigSchema } from '@floors/shared-server';
 import { registerRelayRoutes } from './routes/relay.js';
+import { registerSwapRoutes } from './routes/swap.js';
 import { fileURLToPath } from 'node:url';
 import { join, dirname } from 'node:path';
 
@@ -43,6 +44,7 @@ try {
 const app = await createApp(config, logger);
 
 registerRelayRoutes(app, logger, db, config);
+registerSwapRoutes(app, logger, db, config);
 
 try {
   await app.listen({ port: config.PORT, host: '0.0.0.0' });
