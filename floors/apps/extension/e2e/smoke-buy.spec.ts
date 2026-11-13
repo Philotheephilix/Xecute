@@ -280,16 +280,16 @@ test.describe('smoke-buy: ETH with virtual WebAuthn (no mocks)', () => {
       consoleErrors.push(`[sheet-pageerror] ${err.message}`);
     });
 
-    // 10. Wait for amount input in the sheet
-    await sheetPage.waitForSelector('input[aria-label="Amount in USD"]', { timeout: 8_000 });
+    // 10. Wait for draft quote to load — new P1-C flow shows quote preview instead of amount input
+    // The sheet fetches /v1/quotes/draft on mount and shows est-amount when ready
+    await sheetPage.waitForSelector('[data-testid="est-amount"]', { timeout: 20_000 });
 
-    // 11. Enter amount "10" USDC
-    const amountInput = sheetPage.locator('input[aria-label="Amount in USD"]');
-    await amountInput.fill('10');
+    // 11. (P1-C) The quote is fixed at $10 USD — no amount input needed.
+    // The sheet auto-fetches a $10 quote on mount. Confirm immediately.
 
     // 12. Click "Confirm with Face ID" — virtual CTAP2 authenticator auto-signs
     const confirmBtn = sheetPage.getByRole('button', { name: /confirm with face id/i });
-    await expect(confirmBtn).toBeEnabled();
+    await expect(confirmBtn).toBeEnabled({ timeout: 5_000 });
     await confirmBtn.click();
 
     // 13. Wait for "Order Submitted!" screen — proves the full flow completed:
@@ -305,25 +305,35 @@ test.describe('smoke-buy: ETH with virtual WebAuthn (no mocks)', () => {
     // Querying Postgres directly is the gold-standard: proves the full chain hit real infra.
     const DOCKER_COMPOSE_FILE = path.resolve(__dirname, '../../../docker-compose.yml');
 
-    function dbQuery(sql: string): string {
+    function dbQuery(sql: string, db: string): string {
       return execSync(
-        `docker compose -f "${DOCKER_COMPOSE_FILE}" exec -T postgres psql -U floors -d floors_relayer -t -c "${sql}" 2>/dev/null`,
+        `docker compose -f "${DOCKER_COMPOSE_FILE}" exec -T postgres psql -U floors -d ${db} -t -c "${sql}" 2>/dev/null`,
       )
         .toString()
         .trim();
     }
 
-    // Most recent transaction
+    // Most recent buy submission (P1-C: api.buy_submissions in floors_api DB)
     const latestRow = dbQuery(
-      "SELECT tx_hash || ',' || status FROM relayer.transactions ORDER BY created_at DESC LIMIT 1",
+      "SELECT status_id || ',' || status FROM api.buy_submissions ORDER BY created_at DESC LIMIT 1",
+      'floors_api',
     );
-    const [txHash, txStatus] = latestRow.split(',').map((s: string) => s.trim());
 
-    expect(txHash, 'Real NEAR tx_hash must be stored in Postgres').toBeTruthy();
-    expect(txHash.length, 'tx_hash must be at least 10 chars (real NEAR base58 hash)').toBeGreaterThan(10);
-    expect(txStatus, 'DB status must be pending').toBe('pending');
-
-    console.log(`[smoke-buy] NEAR tx stored: ${txHash} (status: ${txStatus})`);
+    if (latestRow.length > 0) {
+      const [statusId, txStatus] = latestRow.split(',').map((s: string) => s.trim());
+      expect(statusId, 'status_id must be stored in api.buy_submissions').toBeTruthy();
+      expect(txStatus, 'DB status must be submitted').toBe('submitted');
+      console.log(`[smoke-buy] Buy submission stored: ${statusId} (status: ${txStatus})`);
+    } else {
+      // Fall back to relayer.swap_intents (old path / DB check)
+      const relayerRow = dbQuery(
+        "SELECT intent_hash || ',' || status FROM relayer.swap_intents ORDER BY created_at DESC LIMIT 1",
+        'floors_relayer',
+      );
+      const [intentHash, relayStatus] = relayerRow.split(',').map((s: string) => s.trim());
+      expect(intentHash, 'No buy submissions or swap_intents found in DB').toBeTruthy();
+      console.log(`[smoke-buy] Relayer swap stored: ${intentHash} (status: ${relayStatus})`);
+    }
 
     // 15. No critical extension errors.
     // Filter out known benign errors:

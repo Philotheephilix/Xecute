@@ -99,10 +99,54 @@ async function openSheet(ticker: string, postId?: string): Promise<void> {
   });
 }
 
-// ── API buy call ──────────────────────────────────────────────────────────────
+// ── API call helpers ──────────────────────────────────────────────────────────
 
 const API_URL = 'http://localhost:3001';
 
+interface SubmitApiResponse {
+  status_id: string;
+  status: string;
+}
+
+/**
+ * POST /v1/submit — new P1-C endpoint.
+ * The sheet now calls this directly, but the service worker also handles
+ * SHEET_SIGNED messages for any legacy callers.
+ */
+async function postSubmit(
+  ticker: string,
+  amountUsdc: string,
+  signature: string,
+  credentialId: string,
+  quoteId: string,
+  idempotencyKey: string,
+): Promise<SubmitApiResponse> {
+  const res = await fetch(`${API_URL}/v1/submit`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Idempotency-Key': idempotencyKey,
+    },
+    body: JSON.stringify({
+      quote_id: quoteId,
+      assertion: {
+        signature,
+        credential_id: credentialId,
+        ticker,
+        amount_usdc: amountUsdc,
+      },
+    }),
+  });
+
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(`API /v1/submit returned ${res.status.toString()}: ${body}`);
+  }
+
+  return res.json() as Promise<SubmitApiResponse>;
+}
+
+/** Legacy /v1/buy fallback (kept for compatibility) */
 interface BuyApiResponse {
   request_id: string;
   tx_hash: string;
@@ -153,6 +197,7 @@ async function postBuy(
 type MessageResponse =
   | { status: 'ok' }
   | { status: 'ok'; request_id: string; tx_hash: string }
+  | { status: 'ok'; status_id: string }
   | { registry: Registry }
   | { error: string };
 
@@ -218,26 +263,33 @@ chrome.runtime.onMessage.addListener(
           return false;
         }
 
-        const { ticker, amount, signature, credentialId, floorProtection, quoteId } = extended.data;
+        const { ticker, amount, signature, credentialId, quoteId } = extended.data;
 
         // Generate idempotency key for this buy
         const idempotencyKey = crypto.randomUUID();
+        const amountUsdc = Math.round(parseFloat(amount) * 1_000_000).toString();
 
-        console.info('[floors] Posting buy to API:', { ticker, quoteId });
+        console.info('[floors] Posting submit to API:', { ticker, quoteId });
 
-        postBuy(ticker, amount, signature, credentialId, floorProtection, quoteId, idempotencyKey)
+        postSubmit(ticker, amountUsdc, signature, credentialId, quoteId, idempotencyKey)
           .then((apiResponse) => {
-            console.info('[floors] Buy submitted:', apiResponse);
+            console.info('[floors] Submit submitted:', apiResponse);
             sendResponse({
               status: 'ok',
-              request_id: apiResponse.request_id,
-              tx_hash: apiResponse.tx_hash,
+              status_id: apiResponse.status_id,
             });
           })
           .catch((err: unknown) => {
             const msg = err instanceof Error ? err.message : String(err);
-            console.error('[floors] Buy API error:', msg);
-            sendResponse({ error: msg });
+            console.error('[floors] Submit API error:', msg);
+            // Try legacy /v1/buy fallback
+            postBuy(ticker, amount, signature, credentialId, false, quoteId, idempotencyKey)
+              .then((legacy) => {
+                sendResponse({ status: 'ok', request_id: legacy.request_id, tx_hash: legacy.tx_hash });
+              })
+              .catch(() => {
+                sendResponse({ error: msg });
+              });
           });
 
         // Return true to indicate async response
