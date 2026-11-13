@@ -427,6 +427,9 @@ importers:
         specifier: 3.25.67
         version: 3.25.67
     devDependencies:
+      '@noble/curves':
+        specifier: 1.9.1
+        version: 1.9.1
       fast-check:
         specifier: 4.1.1
         version: 4.1.1
@@ -445,6 +448,9 @@ importers:
       '@floors/types':
         specifier: workspace:*
         version: link:../../packages/types
+      '@floors/wallet':
+        specifier: workspace:*
+        version: link:../../packages/wallet
       fastify:
         specifier: 5.3.3
         version: 5.3.3

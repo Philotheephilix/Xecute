@@ -2,9 +2,11 @@ import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { FloorApiError } from '@floors/shared-server';
 import type postgres from 'postgres';
+import { deriveAddress } from '@floors/wallet/nep616';
 
 const CreateAccountBodySchema = z.object({
-  public_key: z.string().min(1),
+  // compressed P-256 public key as hex (66 hex chars = 33 bytes, SEC1 compressed)
+  public_key_hex: z.string().regex(/^[0-9a-f]{66}$/, 'must be 66 hex chars (compressed SEC1 P-256)'),
   credential_id: z.string().min(1),
 });
 
@@ -20,7 +22,26 @@ interface AccountRow {
 type AccountParams = { account_id: string };
 type PositionQueryString = { cursor?: string; limit?: string };
 
+function hexToBytes(hex: string): Uint8Array {
+  const result = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < result.length; i++) {
+    result[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+  }
+  return result;
+}
+
 export function registerAccountRoutes(app: FastifyInstance, db: postgres.Sql): void {
+  /**
+   * POST /v1/accounts
+   *
+   * Creates a new Floors smart account with a NEP-616 deterministic address.
+   *
+   * Address derivation (P1-B):
+   *   account_id = "0s" + hex(keccak256(borsh(StateInit))[12..32])
+   * where StateInit = wallet-webauthn-p256 v0.2.0 code hash + State{key}.
+   *
+   * The account is created on NEAR testnet via the relayer's create-account endpoint.
+   */
   app.post('/v1/accounts', async (request: FastifyRequest, reply: FastifyReply) => {
     // Validate Idempotency-Key
     const idempotencyKeyRaw = request.headers['idempotency-key'];
@@ -66,17 +87,15 @@ export function registerAccountRoutes(app: FastifyInstance, db: postgres.Sql): v
       );
     }
 
-    const { public_key, credential_id } = bodyResult.data;
+    const { public_key_hex, credential_id } = bodyResult.data;
 
-    // Generate account_id from public key (deterministic)
-    const encoder = new TextEncoder();
-    const data = encoder.encode(public_key);
-    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-    const hashArray = Array.from(new Uint8Array(hashBuffer));
-    const hashHex = hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
-    const account_id = `${hashHex.slice(0, 16)}.floors.near`;
+    // Derive NEP-616 deterministic account ID from the compressed P-256 public key
+    const compressedKey = hexToBytes(public_key_hex);
+    const account_id = deriveAddress(compressedKey);
 
-    // Check if account already exists
+    request.log.info({ account_id, public_key_hex: public_key_hex.slice(0, 16) + '...', event: 'account_address_derived' });
+
+    // Check if account already exists in DB
     const existing = await db<AccountRow[]>`
       SELECT account_id FROM api.accounts WHERE account_id = ${account_id}
     `;
@@ -85,7 +104,7 @@ export function registerAccountRoutes(app: FastifyInstance, db: postgres.Sql): v
     if (existing.length === 0) {
       await db`
         INSERT INTO api.accounts (account_id, public_key, credential_id)
-        VALUES (${account_id}, ${public_key}, ${credential_id})
+        VALUES (${account_id}, ${public_key_hex}, ${credential_id})
         ON CONFLICT (account_id) DO NOTHING
       `;
       created = true;
@@ -100,7 +119,7 @@ export function registerAccountRoutes(app: FastifyInstance, db: postgres.Sql): v
       ON CONFLICT (key) DO NOTHING
     `;
 
-    request.log.info({ account_id, created }, 'account_created');
+    request.log.info({ account_id, created, event: 'account_created' });
     return reply.status(created ? 201 : 200).send(response);
   });
 
