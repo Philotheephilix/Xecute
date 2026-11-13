@@ -86,7 +86,8 @@ describe('floor lifecycle bot endpoints', () => {
     const res = await ctx.app.inject({
       method: 'POST',
       url: '/v1/relay/expire-floor',
-      body: { floor_id: 'test_floor_001' },
+      headers: { 'x-internal-secret': process.env['INTERNAL_SECRET'] ?? '' },
+      body: { floor_id: 1 },
     });
 
     // 200 on success, 502 if contract panics (floor not found still broadcasts tx)
@@ -103,6 +104,7 @@ describe('floor lifecycle bot endpoints', () => {
     const res = await ctx.app.inject({
       method: 'POST',
       url: '/v1/relay/expire-floor',
+      headers: { 'x-internal-secret': process.env['INTERNAL_SECRET'] ?? '' },
       body: {},
     });
     expect(res.statusCode).toBe(400);
@@ -115,9 +117,11 @@ describe('floor lifecycle bot endpoints', () => {
       method: 'POST',
       url: '/v1/relay/floor-action',
       body: {
-        floor_id: 'test_floor_001',
+        floor_id: 1,
         action: 'close',
         account_id: 'not-a-0s-address',
+        nonce: '12345678901234567',
+        valid_until_ns: String(BigInt(Date.now()) * 1_000_000n + 300_000_000_000n),
         assertion: {
           signature: 'dGVzdA==',
           credential_id: 'cred1',
@@ -133,9 +137,11 @@ describe('floor lifecycle bot endpoints', () => {
       method: 'POST',
       url: '/v1/relay/floor-action',
       body: {
-        floor_id: 'test_floor_001',
+        floor_id: 1,
         action: 'delete',
         account_id: '0s' + '0'.repeat(40),
+        nonce: '12345678901234568',
+        valid_until_ns: String(BigInt(Date.now()) * 1_000_000n + 300_000_000_000n),
         assertion: {
           signature: 'dGVzdA==',
           credential_id: 'cred1',
@@ -152,17 +158,18 @@ describe('floor lifecycle bot endpoints', () => {
     const res = await ctx.app.inject({
       method: 'POST',
       url: '/v1/relay/expire-floors-batch',
-      body: { floor_ids: ['test_floor_001', 'test_floor_002'] },
+      headers: { 'x-internal-secret': process.env['INTERNAL_SECRET'] ?? '' },
+      body: { floor_ids: [1, 2] },
     });
 
     // Should get 200 with results array regardless of whether floors exist
     expect([200, 502]).toContain(res.statusCode);
     if (res.statusCode === 200) {
-      const body = JSON.parse(res.body) as { results: Array<{ floor_id: string; tx_hash?: string; error?: string }> };
+      const body = JSON.parse(res.body) as { results: Array<{ floor_id: number; tx_hash?: string; error?: string }> };
       expect(Array.isArray(body.results)).toBe(true);
       expect(body.results.length).toBe(2);
       for (const r of body.results) {
-        expect(typeof r.floor_id).toBe('string');
+        expect(typeof r.floor_id).toBe('number');
         // Each result has either tx_hash or error
         expect('tx_hash' in r || 'error' in r).toBe(true);
       }
@@ -173,6 +180,7 @@ describe('floor lifecycle bot endpoints', () => {
     const res = await ctx.app.inject({
       method: 'POST',
       url: '/v1/relay/expire-floors-batch',
+      headers: { 'x-internal-secret': process.env['INTERNAL_SECRET'] ?? '' },
       body: { floor_ids: [] },
     });
     expect(res.statusCode).toBe(400);
@@ -182,7 +190,8 @@ describe('floor lifecycle bot endpoints', () => {
     const res = await ctx.app.inject({
       method: 'POST',
       url: '/v1/relay/expire-floors-batch',
-      body: { floor_ids: Array.from({ length: 51 }, (_, i) => `floor_${i}`) },
+      headers: { 'x-internal-secret': process.env['INTERNAL_SECRET'] ?? '' },
+      body: { floor_ids: Array.from({ length: 51 }, (_, i) => i) },
     });
     expect(res.statusCode).toBe(400);
   });

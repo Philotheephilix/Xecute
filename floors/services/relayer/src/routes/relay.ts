@@ -1,4 +1,4 @@
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { FloorApiError } from '@floors/shared-server';
 import { connect, keyStores, KeyPair } from 'near-api-js';
@@ -18,14 +18,22 @@ import {
 // Schema
 // ---------------------------------------------------------------------------
 
+// BLOCKER 4: floor_id accepts both numeric string and number, transformed to number
+const FloorIdSchema = z
+  .union([z.string().regex(/^\d+$/), z.number().int().nonnegative()])
+  .transform((v) => Number(v));
+
 const ExpireFloorBodySchema = z.object({
-  floor_id: z.string().min(1),
+  floor_id: FloorIdSchema,
 });
 
 const FloorActionBodySchema = z.object({
-  floor_id: z.string().min(1),
+  floor_id: FloorIdSchema,
   action: z.enum(['sell_to_floor', 'close']),
   account_id: z.string().regex(/^0s[0-9a-f]{40}$/),
+  // BLOCKER 3: nonce and valid_until_ns required for replay check
+  nonce: z.string().regex(/^\d+$/),
+  valid_until_ns: z.string().regex(/^\d+$/),
   assertion: z.object({
     signature: z.string(),
     credential_id: z.string(),
@@ -34,7 +42,7 @@ const FloorActionBodySchema = z.object({
 });
 
 const ExpireBatchBodySchema = z.object({
-  floor_ids: z.array(z.string().min(1)).min(1).max(50),
+  floor_ids: z.array(FloorIdSchema).min(1).max(50),
 });
 
 const RelayBodySchema = z.object({
@@ -69,6 +77,30 @@ function hexToBytes(hex: string): Uint8Array {
     result[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
   }
   return result;
+}
+
+// BLOCKER 3: in-memory nonce replay protection (HTTP-layer, chain is authoritative)
+const seenNonces = new Map<string, number>(); // nonce → expiry ms
+
+function checkAndRecordNonce(nonce: string, validUntilNs: string): boolean {
+  const now = Date.now();
+  // clean expired entries
+  for (const [n, exp] of seenNonces) {
+    if (exp < now) seenNonces.delete(n);
+  }
+  if (seenNonces.has(nonce)) return false; // replay
+  const expMs = Number(BigInt(validUntilNs) / 1_000_000n);
+  seenNonces.set(nonce, expMs);
+  return true;
+}
+
+// BLOCKER 1: internal auth preHandler
+async function requireInternalAuth(request: FastifyRequest, reply: FastifyReply): Promise<void> {
+  const secret = process.env['INTERNAL_SECRET'];
+  if (!secret) return; // dev mode: no secret configured → allow
+  if (request.headers['x-internal-secret'] !== secret) {
+    await reply.status(401).send({ error: 'Unauthorized', code: 'UNAUTHORIZED' });
+  }
 }
 
 /**
@@ -470,8 +502,9 @@ export function registerRelayRoutes(
    *
    * Called by cron/indexer when a floor's expires_at has passed.
    * Calls floors.near#expire(floor_id) from the relayer signing key.
+   * BLOCKER 1: protected by internal API key.
    */
-  app.post('/v1/relay/expire-floor', async (request, reply) => {
+  app.post('/v1/relay/expire-floor', { preHandler: requireInternalAuth }, async (request, reply) => {
     const bodyResult = ExpireFloorBodySchema.safeParse(request.body);
     if (!bodyResult.success) {
       throw new FloorApiError(
@@ -498,8 +531,10 @@ export function registerRelayRoutes(
       const outcome = await signingAccount.functionCall({
         contractId: floorsContract,
         methodName: 'expire',
+        // BLOCKER 4: floor_id is now a number (u64)
         args: { floor_id },
-        gas: BigInt(30_000_000_000_000), // 30 TGas
+        // BONUS: expire calls mt_transfer + callback, needs ~50 TGas
+        gas: BigInt(50_000_000_000_000), // 50 TGas
         attachedDeposit: BigInt(0),
       });
 
@@ -520,6 +555,7 @@ export function registerRelayRoutes(
    * User-initiated sell_to_floor or close, called by the API service.
    * Calls w_execute_signed on the user's 0s account with a wallet_request
    * targeting floors.near.
+   * floor-action carries user auth so no internal-auth preHandler here.
    */
   app.post('/v1/relay/floor-action', async (request, reply) => {
     const bodyResult = FloorActionBodySchema.safeParse(request.body);
@@ -533,17 +569,33 @@ export function registerRelayRoutes(
       );
     }
 
-    const { floor_id, action, account_id, assertion } = bodyResult.data;
+    const { floor_id, action, account_id, nonce, valid_until_ns, assertion } = bodyResult.data;
     const floorsContract = config.FLOORS_CONTRACT;
 
+    // BLOCKER 3: reject obvious replays before burning gas
+    if (!checkAndRecordNonce(nonce, valid_until_ns)) {
+      throw new FloorApiError(
+        'REPLAY_DETECTED',
+        'Nonce already used',
+        false,
+        409,
+      );
+    }
+
+    // BLOCKER 2: correct WalletRequest shape matching wallet-contracts-v0.2.0
+    // ExternalCall fields: receiver_id, method_name, args (string), attached_near?, gas?
     const wallet_request = {
-      receiver_id: floorsContract,
-      actions: [{
-        type: 'FunctionCall',
+      nonce,
+      valid_until_ns,
+      external: [{
+        receiver_id: floorsContract,
         method_name: action,
-        args: btoa(JSON.stringify({ floor_id })),
-        gas: '30000000000000',
-        deposit: '1',
+        // BLOCKER 4: floor_id is now a number
+        args: JSON.stringify({ floor_id }),
+        // BLOCKER 5: correct field is attached_near, not deposit
+        attached_near: '1', // 1 yoctoNEAR
+        // BONUS: 50 TGas for sell_to_floor/close
+        gas: '50000000000000',
       }],
     };
 
@@ -563,7 +615,8 @@ export function registerRelayRoutes(
           msg: JSON.stringify(wallet_request),
           proof: assertion.signature,
         },
-        gas: BigInt(30_000_000_000_000), // 30 TGas
+        // BONUS: 50 TGas outer call budget
+        gas: BigInt(50_000_000_000_000), // 50 TGas
         attachedDeposit: BigInt(0),
       });
 
@@ -583,8 +636,9 @@ export function registerRelayRoutes(
    *
    * Expires multiple floors in parallel. Uses Promise.allSettled so one
    * failure does not block others. Returns per-floor results.
+   * BLOCKER 1: protected by internal API key.
    */
-  app.post('/v1/relay/expire-floors-batch', async (request, reply) => {
+  app.post('/v1/relay/expire-floors-batch', { preHandler: requireInternalAuth }, async (request, reply) => {
     const bodyResult = ExpireBatchBodySchema.safeParse(request.body);
     if (!bodyResult.success) {
       throw new FloorApiError(
@@ -611,8 +665,10 @@ export function registerRelayRoutes(
         const outcome = await signingAccount.functionCall({
           contractId: floorsContract,
           methodName: 'expire',
+          // BLOCKER 4: floor_id is now a number (u64)
           args: { floor_id },
-          gas: BigInt(30_000_000_000_000), // 30 TGas
+          // BONUS: 50 TGas for expire (mt_transfer + callback)
+          gas: BigInt(50_000_000_000_000), // 50 TGas
           attachedDeposit: BigInt(0),
         });
         return { floor_id, tx_hash: outcome.transaction_outcome.id };
@@ -620,7 +676,7 @@ export function registerRelayRoutes(
     );
 
     const results = settled.map((result, i) => {
-      const floor_id = floor_ids[i] as string;
+      const floor_id = floor_ids[i];
       if (result.status === 'fulfilled') {
         return { floor_id, tx_hash: result.value.tx_hash };
       } else {
@@ -642,8 +698,9 @@ export function registerRelayRoutes(
    * POST /v1/relay/reconcile
    *
    * Stub — complex settlement logic is out of scope for this ticket.
+   * BLOCKER 1: protected by internal API key.
    */
-  app.post('/v1/relay/reconcile', async (_request, reply) => {
+  app.post('/v1/relay/reconcile', { preHandler: requireInternalAuth }, async (_request, reply) => {
     return reply.status(501).send({ error: 'Not implemented', code: 'NOT_IMPLEMENTED' });
   });
 
@@ -652,8 +709,9 @@ export function registerRelayRoutes(
    *
    * Stub — requires indexer to detect expiring floors and trigger renewal.
    * Out of scope for this ticket.
+   * BLOCKER 1: protected by internal API key.
    */
-  app.post('/v1/relay/auto-protect', async (_request, reply) => {
+  app.post('/v1/relay/auto-protect', { preHandler: requireInternalAuth }, async (_request, reply) => {
     return reply.status(501).send({ error: 'Not implemented', code: 'NOT_IMPLEMENTED' });
   });
 }
