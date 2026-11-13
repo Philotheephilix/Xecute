@@ -13,6 +13,7 @@ const CreateAccountBodySchema = z.object({
   // compressed P-256 public key as hex (66 hex chars = 33 bytes, SEC1 compressed)
   public_key_hex: z.string().regex(/^[0-9a-f]{66}$/, 'must be 66 hex chars (compressed SEC1 P-256)'),
   credential_id: z.string().min(1),
+  invite_code: z.string().min(1).max(8).optional(),
 });
 
 const IdempotencyKeyHeader = z.string().uuid();
@@ -92,7 +93,28 @@ export function registerAccountRoutes(app: FastifyInstance, db: postgres.Sql, re
       );
     }
 
-    const { public_key_hex, credential_id } = bodyResult.data;
+    const { public_key_hex, credential_id, invite_code } = bodyResult.data;
+
+    // Invite-gate: if any invite codes exist in the table, invite mode is on and
+    // a valid, unused code is required to create an account.
+    const inviteCount = await db<Array<{ n: string }>>`
+      SELECT COUNT(*)::text AS n FROM api.invite_codes LIMIT 1
+    `;
+    const inviteModeOn = inviteCount[0] !== undefined && parseInt(inviteCount[0].n, 10) > 0;
+
+    if (inviteModeOn) {
+      if (invite_code === undefined || invite_code === '') {
+        throw new FloorApiError('INVALID_INVITE', 'An invite code is required', false, 400);
+      }
+
+      const upperCode = invite_code.toUpperCase();
+      const codeRows = await db<Array<{ used_at: Date | null }>>`
+        SELECT used_at FROM api.invite_codes WHERE code = ${upperCode}
+      `;
+      if (codeRows.length === 0 || codeRows[0] === undefined || codeRows[0].used_at !== null) {
+        throw new FloorApiError('INVALID_INVITE', 'Invalid or already used invite code', false, 400);
+      }
+    }
 
     // Derive NEP-616 deterministic account ID from the compressed P-256 public key
     const compressedKey = hexToBytes(public_key_hex);
@@ -113,6 +135,16 @@ export function registerAccountRoutes(app: FastifyInstance, db: postgres.Sql, re
         ON CONFLICT (account_id) DO NOTHING
       `;
       created = true;
+
+      // Mark the invite code as redeemed if one was provided.
+      if (inviteModeOn && invite_code !== undefined) {
+        const upperCode = invite_code.toUpperCase();
+        await db`
+          UPDATE api.invite_codes
+          SET used_at = NOW(), used_by = ${account_id}
+          WHERE code = ${upperCode} AND used_at IS NULL
+        `;
+      }
 
       // Fire-and-forget: ask the relayer to create the account on-chain.
       // The address is deterministic so the user can retry if this fails.

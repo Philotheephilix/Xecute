@@ -15,6 +15,10 @@ const CreateAccountResponseSchema = z.object({
   created: z.boolean(),
 });
 
+const ValidateInviteResponseSchema = z.object({
+  valid: z.literal(true),
+});
+
 const AccountSchema = z.object({
   account_id: z.string(),
   public_key: z.string(),
@@ -74,22 +78,45 @@ async function parseResponse<T>(res: Response, schema: z.ZodType<T>): Promise<T>
 // ── Public API ───────────────────────────────────────────────────────────────
 
 /**
+ * Validate an invite code without redeeming it.
+ * Throws ApiError (400) if the code is invalid or already used.
+ */
+export async function validateInviteCode(code: string): Promise<{ valid: true }> {
+  const res = await fetch(`${BASE_URL}/v1/invites/validate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ code }),
+  });
+  return parseResponse(res, ValidateInviteResponseSchema);
+}
+
+/**
  * Create a Floors smart account.
  *
  * @param compressedKeyHex - 66-char hex string of the compressed SEC1 P-256 key (33 bytes)
  * @param credentialId - base64url-encoded WebAuthn credential ID
+ * @param inviteCode - optional invite code; required when the API has invite mode on
  */
 export async function createAccount(
   compressedKeyHex: string,
   credentialId: string,
+  inviteCode?: string,
 ): Promise<{ account_id: string; created: boolean }> {
+  const body: Record<string, string> = {
+    public_key_hex: compressedKeyHex,
+    credential_id: credentialId,
+  };
+  if (inviteCode !== undefined) {
+    body['invite_code'] = inviteCode;
+  }
+
   const res = await fetch(`${BASE_URL}/v1/accounts`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'Idempotency-Key': generateIdempotencyKey(),
     },
-    body: JSON.stringify({ public_key_hex: compressedKeyHex, credential_id: credentialId }),
+    body: JSON.stringify(body),
   });
 
   return parseResponse(res, CreateAccountResponseSchema);

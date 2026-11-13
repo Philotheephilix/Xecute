@@ -10,7 +10,7 @@ interface Props {
   className: string;
 }
 
-export default function CreatePasskey({ navigate, setAccount, className }: Props) {
+export default function CreatePasskey({ navigate, setAccount, account, className }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -21,8 +21,15 @@ export default function CreatePasskey({ navigate, setAccount, className }: Props
       const { credentialId, publicKey, rawPublicKey } = await createPasskey();
       const compressedKey = extractCompressedP256Key(rawPublicKey);
       const compressedKeyHex = toHex(compressedKey);
-      const { account_id } = await createAccount(compressedKeyHex, credentialId);
-      setAccount({ accountId: account_id, credentialId, publicKey, compressedKeyHex });
+      const inviteCode = account?.inviteCode;
+      const { account_id } = await createAccount(compressedKeyHex, credentialId, inviteCode);
+      setAccount({
+        accountId: account_id,
+        credentialId,
+        publicKey,
+        compressedKeyHex,
+        ...(inviteCode !== undefined ? { inviteCode } : {}),
+      });
       navigate('creating-account');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Passkey creation failed');

@@ -53,8 +53,8 @@ async function setupVirtualAuthenticator(
 
 test(
   'full onboarding flow: welcome → passkey → creating → account-ready → enable-trading → fund',
-  { timeout: 60_000 },
   async ({ page }) => {
+    test.setTimeout(60_000);
     // Collect real API responses for assertions
     const apiResponses: Array<{ url: string; status: number; body: string }> = [];
     page.on('response', async (response) => {

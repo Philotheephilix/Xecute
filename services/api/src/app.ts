@@ -6,6 +6,7 @@ import { registerAccountRoutes } from './routes/accounts.js';
 import { registerQuoteRoutes } from './routes/quotes.js';
 import { registerBuyRoutes } from './routes/buy.js';
 import { registerSubmitRoutes } from './routes/submit.js';
+import { registerInviteRoutes } from './routes/invites.js';
 
 export async function buildApp(
   config: ApiConfig & BaseConfig,
@@ -16,6 +17,7 @@ export async function buildApp(
 
   // Register all routes
   registerAccountRoutes(app, db, config.RELAYER_URL);
+  registerInviteRoutes(app, db);
   registerQuoteRoutes(app);
   registerBuyRoutes(app, config.RELAYER_URL);
   registerSubmitRoutes(app, db, config.RELAYER_URL);
