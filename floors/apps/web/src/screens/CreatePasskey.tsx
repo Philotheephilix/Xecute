@@ -26,13 +26,18 @@ export default function CreatePasskey({ navigate, setAccount, account, className
       const compressedKeyHex = toHex(compressedKey);
       const inviteCode = account?.inviteCode;
       const { account_id } = await createAccount(compressedKeyHex, credentialId, inviteCode);
-      setAccount({
+      const newAccount: AccountState = {
         accountId: account_id,
         credentialId,
         publicKey,
         compressedKeyHex,
         ...(inviteCode !== undefined ? { inviteCode } : {}),
-      });
+      };
+      setAccount(newAccount);
+      localStorage.setItem('floors:account_id', newAccount.accountId);
+      localStorage.setItem('floors:credential_id', newAccount.credentialId);
+      localStorage.setItem('floors:public_key', newAccount.publicKey);
+      localStorage.setItem('floors:compressed_key', newAccount.compressedKeyHex);
       navigate('creating-account');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Passkey creation failed');

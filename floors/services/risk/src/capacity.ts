@@ -128,6 +128,13 @@ export function reserveCapacity(
  * Release a reservation immediately (e.g. quote was rejected on-chain, or test cleanup).
  */
 export function releaseCapacity(quoteId: string): void {
+  const res = reservations.get(quoteId);
+  if (res?.account_id) {
+    const current = accountNotional.get(res.account_id) ?? 0n;
+    const next = current - res.notional_e6;
+    if (next <= 0n) accountNotional.delete(res.account_id);
+    else accountNotional.set(res.account_id, next);
+  }
   reservations.delete(quoteId);
 }
 

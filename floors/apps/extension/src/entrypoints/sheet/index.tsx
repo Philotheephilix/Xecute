@@ -297,7 +297,7 @@ function BuyScreen({ state, onConfirm, onBack, onFloorChange }: BuyScreenProps) 
       {/* Header */}
       <div
         style={{
-          background: 'linear-gradient(to bottom, #ED7725, #F28530)',
+          background: 'linear-gradient(to bottom, #ED7725, #EF7B28)',
           borderBottom: '2px solid #111111',
           borderRadius: '0 0 28px 28px',
           padding: '16px 18px 20px',
@@ -668,9 +668,11 @@ interface PartialScreenProps {
   onContinue: () => void;
   /** H5: sell the partially-received token back to USDC */
   onSellBack: () => void;
+  /** Disable buttons while a sell-back signing is in progress */
+  signing?: boolean;
 }
 
-function PartialScreen({ ticker, draftQuote, floorError, actualQty, onAddFloor, onContinue, onSellBack }: PartialScreenProps) {
+function PartialScreen({ ticker, draftQuote, floorError, actualQty, onAddFloor, onContinue, onSellBack, signing }: PartialScreenProps) {
   return (
     <div
       className="screen screen-enter-right screen-active"
@@ -785,6 +787,7 @@ function PartialScreen({ ticker, draftQuote, floorError, actualQty, onAddFloor, 
         <button
           className="btn-neo"
           onClick={onSellBack}
+          disabled={signing}
           style={{
             width: '100%',
             height: '44px',
@@ -792,10 +795,12 @@ function PartialScreen({ ticker, draftQuote, floorError, actualQty, onAddFloor, 
             color: '#6b7280',
             fontSize: '13px',
             fontWeight: 600,
+            opacity: signing ? 0.6 : 1,
+            cursor: signing ? 'not-allowed' : 'pointer',
           }}
           data-testid="swap-back-to-usdc"
         >
-          Swap back to USDC
+          {signing ? 'Signing…' : 'Swap back to USDC'}
         </button>
       </div>
     </div>
@@ -1329,6 +1334,7 @@ function App() {
           onAddFloor={handleAddFloor}
           onContinue={handleContinueWithoutFloor}
           onSellBack={handleSellBack}
+          signing={state.signing}
         />
       )}
       {state.screen === 'error' && (

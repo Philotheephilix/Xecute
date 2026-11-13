@@ -352,7 +352,8 @@ impl Contract {
 
         // Decode the quote ID so we can release it on any failure path.
         // This must succeed — the hex was valid when hold_quote was called in mt_on_transfer.
-        let quote_id_bytes: Option<[u8; 32]> = decode_hex32(&quote_id_hex);
+        let quote_id_bytes: [u8; 32] = decode_hex32(&quote_id_hex)
+            .unwrap_or_else(|| env::panic_str("E_CORRUPT_QUOTE_ID: failed to decode"));
 
         // C3 fix: Extract sleeve_id before full deserialization so rollback works even
         // if full quote deserialization fails.
@@ -367,29 +368,29 @@ impl Contract {
             Ok(q) => q,
             Err(_) => {
                 self.rollback_sleeve_hold(&sleeve_id_for_rollback, floor_usdc);
-                if let Some(qid) = quote_id_bytes { self.release_quote(qid); }
+                self.release_quote(quote_id_bytes);
                 return refusal;
             }
         };
 
         let Ok(expected_qty) = quote.qty.parse::<u128>() else {
             self.rollback_sleeve_hold(&quote.sleeve, floor_usdc);
-            if let Some(qid) = quote_id_bytes { self.release_quote(qid); }
+            self.release_quote(quote_id_bytes);
             return refusal;
         };
         let Ok(expected_fee) = quote.fee_usdc.parse::<u128>() else {
             self.rollback_sleeve_hold(&quote.sleeve, floor_usdc);
-            if let Some(qid) = quote_id_bytes { self.release_quote(qid); }
+            self.release_quote(quote_id_bytes);
             return refusal;
         };
         let Ok(floor_price_e6) = quote.floor_price_e6.parse::<u128>() else {
             self.rollback_sleeve_hold(&quote.sleeve, floor_usdc);
-            if let Some(qid) = quote_id_bytes { self.release_quote(qid); }
+            self.release_quote(quote_id_bytes);
             return refusal;
         };
         let Ok(expires_at_ns) = quote.expires_at_ns.parse::<u64>() else {
             self.rollback_sleeve_hold(&quote.sleeve, floor_usdc);
-            if let Some(qid) = quote_id_bytes { self.release_quote(qid); }
+            self.release_quote(quote_id_bytes);
             return refusal;
         };
 
@@ -407,7 +408,7 @@ impl Contract {
             Some(p) if p.price >= 0 => p,
             _ => {
                 self.rollback_sleeve_hold(&quote.sleeve, floor_usdc);
-                if let Some(qid) = quote_id_bytes { self.release_quote(qid); }
+                self.release_quote(quote_id_bytes);
                 return refusal;
             }
         };
@@ -422,7 +423,7 @@ impl Contract {
                     Some(v) => v,
                     None => {
                         self.rollback_sleeve_hold(&quote.sleeve, floor_usdc);
-                        if let Some(qid) = quote_id_bytes { self.release_quote(qid); }
+                        self.release_quote(quote_id_bytes);
                         return refusal;
                     }
                 }
@@ -447,7 +448,7 @@ impl Contract {
         let rhs = pyth_price_e6.saturating_mul(10_000 + tolerance_bps);
         if lhs > rhs {
             self.rollback_sleeve_hold(&quote.sleeve, floor_usdc);
-            if let Some(qid) = quote_id_bytes { self.release_quote(qid); }
+            self.release_quote(quote_id_bytes);
             return refusal;
         }
 

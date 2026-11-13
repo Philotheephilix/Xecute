@@ -180,7 +180,12 @@ export default function Portfolio({ navigate, account, className }: Props) {
         <div className="bg-white border-2 border-[#111] rounded-[18px] shadow-neo p-5">
           <p className="text-xs font-extrabold text-gray-500 mb-1">TOTAL BALANCE</p>
           <p className="text-4xl font-extrabold text-[#111]">
-            {loadingBalance ? 'Loading…' : (balance ?? '—')}
+            {loadingBalance ? (
+              <span className="flex items-center gap-2">
+                <span className="w-4 h-4 border-2 border-[#111] border-t-transparent rounded-full animate-spin" />
+                <span>Loading…</span>
+              </span>
+            ) : (balance ?? '—')}
           </p>
         </div>
 

@@ -64,9 +64,9 @@ function BackArrow() {
       viewBox="0 0 24 24"
       fill="none"
       stroke="#111111"
-      stroke-width="2.5"
-      stroke-linecap="round"
-      stroke-linejoin="round"
+      strokeWidth="2.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
     >
       <line x1="19" y1="12" x2="5" y2="12" />
       <polyline points="12 19 5 12 12 5" />
@@ -82,9 +82,9 @@ function CheckCircle() {
       viewBox="0 0 24 24"
       fill="none"
       stroke="#29CEB4"
-      stroke-width="2.5"
-      stroke-linecap="round"
-      stroke-linejoin="round"
+      strokeWidth="2.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
     >
       <circle cx="12" cy="12" r="10" />
       <polyline points="9 12 11.5 14.5 15 10" />
@@ -111,7 +111,7 @@ function BuyScreen({ state, onConfirm, onBack }: BuyScreenProps) {
       {/* Header */}
       <div
         style={{
-          background: 'linear-gradient(to bottom, #ED7725, #F28530)',
+          background: 'linear-gradient(to bottom, #ED7725, #EF7B28)',
           borderBottom: '2px solid #111111',
           borderRadius: '0 0 28px 28px',
           padding: '16px 18px 20px',
@@ -182,7 +182,7 @@ function BuyScreen({ state, onConfirm, onBack }: BuyScreenProps) {
           )}
 
           {draftError !== null && !draftLoading && (
-            <div style={{ fontSize: '13px', color: '#ef4444', fontWeight: 600 }}>
+            <div style={{ fontSize: '13px', color: '#EF7B28', fontWeight: 600 }}>
               {draftError}
             </div>
           )}
@@ -403,7 +403,7 @@ function ErrorScreen({ message, onRetry }: { message: string; onRetry: () => voi
       class="screen screen-active"
       style={{ padding: '32px 18px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '16px' }}
     >
-      <div style={{ fontSize: '20px', fontWeight: 800, color: '#ef4444' }}>Order Failed</div>
+      <div style={{ fontSize: '20px', fontWeight: 800, color: '#EF7B28' }}>Order Failed</div>
       <div style={{ fontSize: '13px', fontWeight: 600, color: '#6b7280', textAlign: 'center' }}>{message}</div>
       <button
         class="btn-neo"

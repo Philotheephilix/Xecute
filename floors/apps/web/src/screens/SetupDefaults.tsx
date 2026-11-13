@@ -155,13 +155,15 @@ export default function SetupDefaults({ navigate, className }: Props) {
         <div className="flex flex-col gap-3 mt-2">
           <button
             onClick={handleSave}
-            className="w-full h-14 bg-[#EF7B28] text-white border-2 border-[#111] rounded-[13px] text-base font-extrabold shadow-neo shadow-neo-active"
+            disabled={loading}
+            className="w-full h-14 bg-[#EF7B28] text-white border-2 border-[#111] rounded-[13px] text-base font-extrabold shadow-neo shadow-neo-active disabled:opacity-60 disabled:cursor-not-allowed"
           >
             Save &amp; Continue
           </button>
           <button
             onClick={() => navigate('enable-trading')}
-            className="w-full h-14 bg-white text-[#111] border-2 border-[#111] rounded-[13px] text-base font-extrabold shadow-neo-sm shadow-neo-active"
+            disabled={loading}
+            className="w-full h-14 bg-white text-[#111] border-2 border-[#111] rounded-[13px] text-base font-extrabold shadow-neo-sm shadow-neo-active disabled:opacity-60 disabled:cursor-not-allowed"
           >
             Skip for now
           </button>

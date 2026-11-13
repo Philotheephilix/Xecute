@@ -550,6 +550,11 @@ impl Contract {
             None => return,
         };
 
+        near_sdk::require!(
+            floor.status == FloorStatus::PayoutPending,
+            "E_UNEXPECTED_STATUS: expected PayoutPending"
+        );
+
         let usdc_id = self.params.usdc.clone();
 
         if success {

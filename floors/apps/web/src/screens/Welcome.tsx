@@ -24,8 +24,9 @@ export default function Welcome({ navigate, setAccount, className }: Props) {
       return;
     }
 
+    const compressedKeyHex = localStorage.getItem('floors:compressed_key') ?? '';
     setSignInError(null);
-    setAccount({ accountId, credentialId, publicKey, compressedKeyHex: '' });
+    setAccount({ accountId, credentialId, publicKey, compressedKeyHex });
     navigate('portfolio');
   };
   return (

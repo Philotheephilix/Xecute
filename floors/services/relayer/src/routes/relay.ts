@@ -502,8 +502,9 @@ export function registerRelayRoutes(
   /**
    * Persist a nonce to Postgres for replay protection.
    *
-   * Returns true when the nonce was successfully recorded (first use),
-   * false when the nonce already exists (replay attempt → caller should 409).
+   * Throws a FloorApiError (400) when the request has expired (valid_until_ns in the past).
+   * Throws a FloorApiError (409) when the nonce already exists (replay attempt).
+   * Returns void on success (nonce recorded for the first time).
    *
    * Also prunes expired nonces on each call (cheap DELETE; index on expires_at).
    */
