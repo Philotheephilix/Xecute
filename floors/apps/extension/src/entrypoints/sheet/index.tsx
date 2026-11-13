@@ -185,8 +185,9 @@ function FloorRow({ floor, draftQuote, onChange }: FloorRowProps) {
     ...btnBase,
     background: '#29CEB4',
     color: '#111111',
-    boxShadow: '0px 2.5px 0px #111111',
+    // boxShadow removed — handled by shadow-neo-sm Tailwind class below
   };
+  const btnActiveClass = 'shadow-neo-sm active:translate-y-[2px] active:shadow-none';
 
   return (
     <div
@@ -210,6 +211,7 @@ function FloorRow({ floor, draftQuote, onChange }: FloorRowProps) {
           {bpsOptions.map(({ label, value }) => (
             <button
               key={value}
+              class={floor.bps === value ? btnActiveClass : undefined}
               style={floor.bps === value ? btnActive : btnInactive}
               onClick={() => onChange({ ...floor, bps: value })}
               aria-pressed={floor.bps === value}
@@ -228,6 +230,7 @@ function FloorRow({ floor, draftQuote, onChange }: FloorRowProps) {
             {durationOptions.map(({ label, value }) => (
               <button
                 key={value}
+                class={floor.duration_secs === value ? btnActiveClass : undefined}
                 style={floor.duration_secs === value ? btnActive : btnInactive}
                 onClick={() => onChange({ ...floor, duration_secs: value })}
                 aria-pressed={floor.duration_secs === value}
@@ -396,7 +399,7 @@ function BuyScreen({ state, onConfirm, onBack, onFloorChange }: BuyScreenProps) 
                   </div>
                   {draftQuote.fee_usdc !== undefined && (
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <span style={{ fontSize: '12px', fontWeight: 600, color: '#6b7280' }}>Protection cost</span>
+                      <span style={{ fontSize: '12px', fontWeight: 700, color: '#29CEB4' }}>Most you can lose</span>
                       <span style={{ fontSize: '13px', fontWeight: 800, color: '#111111' }}>
                         {formatFee(draftQuote.fee_usdc)}
                       </span>
@@ -744,7 +747,7 @@ function PartialScreen({ ticker, draftQuote, floorError, onAddFloor, onContinue 
           }}
           data-testid="add-floor-now"
         >
-          <span role="img" aria-label="shield">🛡</span> Add floor now
+          <span role="img" aria-label="shield">🛡</span> Try the floor again
         </button>
         <button
           class="btn-neo"
@@ -759,8 +762,10 @@ function PartialScreen({ ticker, draftQuote, floorError, onAddFloor, onContinue 
           }}
           data-testid="continue-without-floor"
         >
-          Continue without floor
+          Keep without floor
         </button>
+        {/* TODO(deferred): "Swap back to USDC" — requires reversing the swap;
+            complex flow, deferred. See docs/20-extension-x-overlay.md §partial-outcome. */}
       </div>
     </div>
   );
@@ -941,7 +946,7 @@ function App() {
       void browser.runtime.sendMessage({
         type: 'SHEET_SIGNED',
         ticker: state.ticker,
-        amount: (parseFloat(quote.pay_usdc) / 1_000_000).toString(),
+        amount: (BigInt(quote.pay_usdc) / 1_000_000n).toString(),
         signature: sigHex,
         publicKey: credentialId,
         credentialId,
