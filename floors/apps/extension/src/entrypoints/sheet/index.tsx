@@ -462,7 +462,7 @@ function BuyScreen({ state, onConfirm, onBack, onFloorChange }: BuyScreenProps) 
           aria-busy={signing}
         >
           {signing ? (
-            'Verifying...'
+            'Verifying…'
           ) : (
             <>
               <span>Confirm with Passkey</span>
