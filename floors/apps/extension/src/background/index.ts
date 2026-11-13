@@ -101,7 +101,7 @@ async function openSheet(ticker: string, postId?: string): Promise<void> {
 
 // ── API call helpers ──────────────────────────────────────────────────────────
 
-const API_URL = 'http://localhost:3001';
+const API_URL = (import.meta as ImportMeta & { env: Record<string, string> }).env['VITE_API_URL'] ?? 'http://localhost:3001';
 
 interface SubmitApiResponse {
   status_id: string;

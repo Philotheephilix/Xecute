@@ -297,7 +297,7 @@ function BuyScreen({ state, onConfirm, onBack, onFloorChange }: BuyScreenProps) 
       {/* Header */}
       <div
         style={{
-          background: 'linear-gradient(to bottom, #ED7725, #EF7B28)',
+          background: '#EF7B28',
           borderBottom: '2px solid #111111',
           borderRadius: '0 0 28px 28px',
           padding: '16px 18px 20px',
