@@ -71,6 +71,7 @@ test(
 
     // ── Step 1: Welcome screen ────────────────────────────────────────────────
     await page.goto('/');
+    await page.waitForLoadState('load');
     await expect(page.locator('h1').filter({ hasText: 'Floors' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Get Started' })).toBeVisible();
 
@@ -167,18 +168,21 @@ test(
     // and a deposit card with an address. Even without real deposit-address API,
     // the fallback returns the NEAR account_id as the address.
     const depositFromSection = page.getByText('DEPOSIT FROM').or(page.getByText('Send USDC to this address'));
-    await expect(depositFromSection).toBeVisible({ timeout: 10_000 });
+    await expect(depositFromSection.first()).toBeVisible({ timeout: 10_000 });
   },
 );
 
 test('welcome screen renders correctly', async ({ page }) => {
   await page.goto('/');
-  await expect(page.locator('h1').filter({ hasText: 'Floors' })).toBeVisible();
+  await page.waitForLoadState('load');
+  await expect(page.locator('h1').filter({ hasText: 'Floors' })).toBeVisible({ timeout: 10_000 });
   await expect(page.getByRole('button', { name: 'Get Started' })).toBeVisible();
 });
 
 test('back navigation from create-passkey returns to welcome', async ({ page }) => {
   await page.goto('/');
+  await page.waitForLoadState('load');
+  await expect(page.locator('h1').filter({ hasText: 'Floors' })).toBeVisible({ timeout: 10_000 });
   await page.getByRole('button', { name: 'Get Started' }).click();
   await expect(page.getByText('Secure Your Account')).toBeVisible({ timeout: 5_000 });
   await page.click('[aria-label="Go back"]');

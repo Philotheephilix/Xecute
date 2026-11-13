@@ -44,7 +44,7 @@ export type DepositAddress = z.infer<typeof DepositAddressSchema>;
 // ── Utilities ────────────────────────────────────────────────────────────────
 
 function generateIdempotencyKey(): string {
-  return `${Date.now()}-${crypto.randomUUID()}`;
+  return crypto.randomUUID();
 }
 
 export class ApiError extends Error {
