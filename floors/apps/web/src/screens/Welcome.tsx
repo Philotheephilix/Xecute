@@ -7,6 +7,9 @@ interface Props {
   className: string;
 }
 
+const REQUIRE_INVITE =
+  (import.meta as ImportMeta & { env: Record<string, string> }).env['VITE_REQUIRE_INVITE'] === 'true';
+
 export default function Welcome({ navigate, className }: Props) {
   return (
     <div className={className}>
@@ -55,7 +58,7 @@ export default function Welcome({ navigate, className }: Props) {
         {/* Bottom CTA section */}
         <div className="w-full max-w-sm flex flex-col gap-4">
           <button
-            onClick={() => navigate('create-passkey')}
+            onClick={() => navigate(REQUIRE_INVITE ? 'invite-code' : 'create-passkey')}
             className="w-full h-14 bg-[#EF7B28] text-white border-2 border-[#111] rounded-[13px] text-base font-extrabold shadow-neo shadow-neo-active transition-transform"
           >
             Get Started

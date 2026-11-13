@@ -79,20 +79,36 @@ export default function AccountReady({ navigate, account, className }: Props) {
           ))}
         </div>
 
-        {/* Fund button */}
+        {/* Set Up Defaults — primary onboarding CTA */}
         <button
-          onClick={() => navigate('fund')}
-          className="w-full h-14 bg-[#29CEB4] text-[#111] border-2 border-[#111] rounded-[13px] text-base font-extrabold shadow-neo shadow-neo-active"
+          onClick={() => navigate('setup-defaults')}
+          className="w-full h-14 bg-[#29CEB4] text-white border-2 border-[#111] rounded-[13px] text-base font-extrabold shadow-neo shadow-neo-active"
         >
-          Fund Your Account
+          🛡 Set Up Defaults
         </button>
 
-        {/* Open extension button */}
+        {/* Skip defaults → fund */}
+        <button
+          onClick={() => navigate('fund')}
+          className="w-full h-14 bg-white text-[#111] border-2 border-[#111] rounded-[13px] text-base font-extrabold shadow-neo-sm shadow-neo-active"
+        >
+          Skip for now
+        </button>
+
+        {/* Enable Trading */}
+        <button
+          onClick={() => navigate('enable-trading')}
+          className="w-full h-14 bg-[#9662FF] text-white border-2 border-[#111] rounded-[13px] text-base font-extrabold shadow-neo shadow-neo-active"
+        >
+          Enable Trading
+        </button>
+
+        {/* Open Portfolio button */}
         <button
           onClick={() => navigate('portfolio')}
           className="w-full h-14 bg-white text-[#111] border-2 border-[#111] rounded-[13px] text-base font-extrabold shadow-neo-sm shadow-neo-active"
         >
-          Open Portfolio
+          View Portfolio
         </button>
       </div>
     </div>

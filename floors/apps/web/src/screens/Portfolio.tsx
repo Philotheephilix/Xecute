@@ -1,4 +1,7 @@
+import { useState, useEffect } from 'react';
 import type { Screen, AccountState } from '../App';
+import type { Position } from '../api/client';
+import { getPositions, submitAction } from '../api/client';
 
 interface Props {
   navigate: (to: Screen) => void;
@@ -7,8 +10,78 @@ interface Props {
   className: string;
 }
 
+function formatDate(iso: string): string {
+  try {
+    return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  } catch {
+    return iso;
+  }
+}
+
+function BadgeStatus({ status }: { status: Position['status'] }) {
+  if (status === 'active') {
+    return (
+      <span className="px-2 py-0.5 rounded-full text-[11px] font-extrabold bg-[#29CEB4] text-white border border-[#111]">
+        ACTIVE
+      </span>
+    );
+  }
+  if (status === 'expired') {
+    return (
+      <span className="px-2 py-0.5 rounded-full text-[11px] font-extrabold bg-gray-200 text-gray-600 border border-[#111]">
+        EXPIRED
+      </span>
+    );
+  }
+  return (
+    <span className="px-2 py-0.5 rounded-full text-[11px] font-extrabold bg-[#EF7B28] text-white border border-[#111]">
+      CLOSED
+    </span>
+  );
+}
+
 export default function Portfolio({ navigate, account, className }: Props) {
   const accountId = account?.accountId ?? '0sabc123def456';
+  const [positions, setPositions] = useState<Position[]>([]);
+  const [balance, setBalance] = useState<string | null>(null);
+  const [loadingPositions, setLoadingPositions] = useState(true);
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoadingPositions(true);
+    getPositions(accountId)
+      .then((pos) => {
+        if (!cancelled) {
+          setPositions(pos);
+          // Use near_balance from positions if available — getPositions currently returns Position[]
+          // so balance comes separately; default to showing account id for now
+          setBalance(pos.length > 0 ? 'Loading…' : null);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setPositions([]);
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingPositions(false);
+      });
+    return () => { cancelled = true; };
+  }, [accountId]);
+
+  const handleAction = async (action: 'sell_to_floor' | 'close', floorId: string) => {
+    if (actionLoading) return;
+    setActionLoading(floorId + ':' + action);
+    try {
+      await submitAction({ action, floor_id: floorId, account_id: accountId });
+      // Refresh positions after action
+      const updated = await getPositions(accountId);
+      setPositions(updated);
+    } catch (err) {
+      console.error('[floors] action failed:', err);
+    } finally {
+      setActionLoading(null);
+    }
+  };
 
   return (
     <div className={className}>
@@ -58,7 +131,9 @@ export default function Portfolio({ navigate, account, className }: Props) {
         {/* Balance card */}
         <div className="bg-white border-2 border-[#111] rounded-[18px] shadow-neo p-5">
           <p className="text-xs font-extrabold text-gray-500 mb-1">TOTAL BALANCE</p>
-          <p className="text-4xl font-extrabold text-[#111]">0.00 NEAR</p>
+          <p className="text-4xl font-extrabold text-[#111]">
+            {balance ?? (loadingPositions ? 'Loading…' : '0.00 NEAR')}
+          </p>
           <p className="text-sm font-semibold text-gray-400 mt-0.5">≈ $0.00 USD</p>
         </div>
 
@@ -82,27 +157,76 @@ export default function Portfolio({ navigate, account, className }: Props) {
           ))}
         </div>
 
-        {/* Empty state */}
-        <div className="bg-white border-2 border-[#111] rounded-[18px] shadow-neo-sm p-6 flex flex-col items-center gap-3 text-center">
-          <div className="w-12 h-12 bg-[#FAF9F6] border-2 border-[#111] rounded-[13px] flex items-center justify-center">
-            <svg className="w-6 h-6 stroke-current fill-none stroke-[2.2]" viewBox="0 0 24 24">
-              <rect x="2" y="5" width="20" height="14" rx="3" />
-              <path d="M16 12h.01" />
-            </svg>
+        {/* Floor positions */}
+        {loadingPositions ? (
+          <div className="bg-white border-2 border-[#111] rounded-[18px] shadow-neo-sm p-6 text-center">
+            <p className="text-sm font-semibold text-gray-500">Loading floors…</p>
           </div>
-          <div>
-            <p className="text-sm font-extrabold text-[#111]">No transactions yet</p>
-            <p className="text-xs font-semibold text-gray-500 mt-1">
-              Fund your account to get started
-            </p>
+        ) : positions.length === 0 ? (
+          <div className="bg-white border-2 border-[#111] rounded-[18px] shadow-neo-sm p-6 flex flex-col items-center gap-3 text-center">
+            <div className="w-12 h-12 bg-[#FAF9F6] border-2 border-[#111] rounded-[13px] flex items-center justify-center">
+              <svg className="w-6 h-6 stroke-current fill-none stroke-[2.2]" viewBox="0 0 24 24">
+                <rect x="2" y="5" width="20" height="14" rx="3" />
+                <path d="M16 12h.01" />
+              </svg>
+            </div>
+            <div>
+              <p className="text-sm font-extrabold text-[#111]">No floors yet</p>
+              <p className="text-xs font-semibold text-gray-500 mt-1">
+                Buy with protection to see them here.
+              </p>
+            </div>
+            <button
+              onClick={() => navigate('fund')}
+              className="px-5 py-2.5 bg-[#EF7B28] text-white border-2 border-[#111] rounded-[13px] text-sm font-extrabold shadow-neo-sm shadow-neo-active"
+            >
+              Fund Account
+            </button>
           </div>
-          <button
-            onClick={() => navigate('fund')}
-            className="px-5 py-2.5 bg-[#EF7B28] text-white border-2 border-[#111] rounded-[13px] text-sm font-extrabold shadow-neo-sm shadow-neo-active"
-          >
-            Fund Account
-          </button>
-        </div>
+        ) : (
+          <div className="flex flex-col gap-3">
+            {positions.map((pos) => {
+              const key = pos.floor_id;
+              const isBusy = actionLoading?.startsWith(key + ':');
+              return (
+                <div key={key} className="bg-white border-2 border-[#111] rounded-[18px] shadow-neo p-4">
+                  <div className="flex items-start justify-between mb-1">
+                    <p className="text-base font-extrabold text-[#111]">{pos.amount} {pos.asset}</p>
+                    <BadgeStatus status={pos.status} />
+                  </div>
+                  {pos.floor_price_usd !== undefined && (
+                    <p className="text-sm font-semibold text-gray-600">
+                      Floor at ${pos.floor_price_usd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </p>
+                  )}
+                  {pos.protected_until && (
+                    <p className="text-xs font-semibold text-gray-400 mt-0.5">
+                      Protected until {formatDate(pos.protected_until)}
+                    </p>
+                  )}
+                  {pos.status !== 'closed' && (
+                    <div className="flex gap-2 mt-3">
+                      <button
+                        onClick={() => handleAction('sell_to_floor', pos.floor_id)}
+                        disabled={!!isBusy}
+                        className="flex-1 h-10 bg-[#29CEB4] text-white border-2 border-[#111] rounded-[10px] text-xs font-extrabold shadow-neo-sm shadow-neo-active disabled:opacity-50"
+                      >
+                        {actionLoading === key + ':sell_to_floor' ? '…' : 'Sell to floor'}
+                      </button>
+                      <button
+                        onClick={() => handleAction('close', pos.floor_id)}
+                        disabled={!!isBusy}
+                        className="flex-1 h-10 bg-white text-[#111] border-2 border-[#111] rounded-[10px] text-xs font-extrabold shadow-neo-sm shadow-neo-active disabled:opacity-50"
+                      >
+                        {actionLoading === key + ':close' ? '…' : 'Close'}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );

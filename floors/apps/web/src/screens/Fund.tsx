@@ -1,5 +1,7 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import type { Screen, AccountState } from '../App';
+import { getDepositAddresses } from '../api/client';
+import type { DepositAddress } from '../api/client';
 
 interface Props {
   navigate: (to: Screen) => void;
@@ -14,9 +16,42 @@ interface ToastState {
   message: string;
 }
 
+const CHAIN_COLORS: Record<string, string> = {
+  NEAR: '#29CEB4',
+  Ethereum: '#9662FF',
+  Base: '#0052FF',
+  Arbitrum: '#28A0F0',
+  Solana: '#9945FF',
+};
+
 export default function Fund({ navigate, account, className }: Props) {
   const accountId = account?.accountId ?? '0sabc123def456';
   const [toast, setToast] = useState<ToastState>({ visible: false, exiting: false, message: '' });
+  const [depositAddresses, setDepositAddresses] = useState<DepositAddress[]>([]);
+  const [selectedChain, setSelectedChain] = useState<string>('NEAR');
+  const [loadingAddresses, setLoadingAddresses] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const addresses = await getDepositAddresses(accountId);
+        if (!cancelled) {
+          setDepositAddresses(addresses);
+          if (addresses.length > 0 && addresses[0] !== undefined) {
+            setSelectedChain(addresses[0].chain);
+          }
+        }
+      } catch (err) {
+        console.warn('[floors] Failed to load deposit addresses:', err);
+      } finally {
+        if (!cancelled) setLoadingAddresses(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [accountId]);
 
   const showToast = useCallback((message: string) => {
     setToast({ visible: true, exiting: false, message });
@@ -28,9 +63,12 @@ export default function Fund({ navigate, account, className }: Props) {
     }, 3000);
   }, []);
 
+  const selectedDeposit = depositAddresses.find((a) => a.chain === selectedChain);
+  const displayAddress = selectedDeposit?.address ?? accountId;
+
   const copyAddress = async () => {
     try {
-      await navigator.clipboard.writeText(accountId);
+      await navigator.clipboard.writeText(displayAddress);
       showToast('Address copied!');
     } catch {
       showToast('Could not copy — please copy manually');
@@ -72,9 +110,39 @@ export default function Fund({ navigate, account, className }: Props) {
         <span className="text-base font-extrabold text-[#111]">Fund Account</span>
       </div>
 
-      <div className="flex flex-col px-6 gap-6">
-        {/* Deposit card styled like bank card */}
-        <div className="w-full max-w-[296px] mx-auto h-[166px] bg-gradient-to-br from-[#FF8833] via-[#ED7725] to-[#E26610] rounded-[22px] border-2 border-[#111] shadow-neo p-[18px_20px] flex flex-col justify-between relative overflow-hidden">
+      <div className="flex flex-col px-6 gap-5 pb-8">
+        {/* Chain selector */}
+        {!loadingAddresses && depositAddresses.length > 0 && (
+          <div>
+            <p className="text-xs font-extrabold text-gray-500 mb-2">DEPOSIT FROM</p>
+            <div className="flex gap-2 flex-wrap">
+              {depositAddresses.map((dep) => {
+                const color = CHAIN_COLORS[dep.chain] ?? '#EF7B28';
+                const isSelected = dep.chain === selectedChain;
+                return (
+                  <button
+                    key={dep.chain}
+                    onClick={() => setSelectedChain(dep.chain)}
+                    className={`px-3 py-1.5 rounded-[10px] border-2 border-[#111] text-xs font-extrabold shadow-neo-sm transition-colors ${
+                      isSelected ? 'text-white' : 'bg-white text-[#111]'
+                    }`}
+                    style={isSelected ? { backgroundColor: color } : {}}
+                  >
+                    {dep.chain}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Deposit card */}
+        <div
+          className="w-full max-w-[296px] mx-auto h-[166px] rounded-[22px] border-2 border-[#111] shadow-neo p-[18px_20px] flex flex-col justify-between relative overflow-hidden"
+          style={{
+            background: `linear-gradient(135deg, ${CHAIN_COLORS[selectedChain] ?? '#EF7B28'} 0%, ${CHAIN_COLORS[selectedChain] ?? '#EF7B28'}cc 100%)`,
+          }}
+        >
           {/* Decorative circles */}
           <svg
             className="absolute -right-8 -bottom-10 w-44 h-44 opacity-10 pointer-events-none"
@@ -88,16 +156,18 @@ export default function Fund({ navigate, account, className }: Props) {
           </svg>
 
           <div className="relative z-10">
-            <p className="text-xs font-bold text-[#3A1B08]">Deposit NEAR</p>
+            <p className="text-xs font-bold text-black/60">
+              Deposit USDC · {selectedChain}
+            </p>
             <p className="text-lg font-black text-[#111] tracking-tight mt-0.5">
-              Send NEAR to this address
+              Send USDC to this address
             </p>
           </div>
 
           <div className="relative z-10">
-            <p className="text-[10px] font-bold text-[#5A2D0C]">WALLET ADDRESS</p>
+            <p className="text-[10px] font-bold text-black/50">WALLET ADDRESS</p>
             <p className="font-mono text-sm font-bold text-[#111] tracking-wide truncate">
-              {accountId}
+              {displayAddress}
             </p>
           </div>
         </div>
@@ -119,10 +189,10 @@ export default function Fund({ navigate, account, className }: Props) {
           <h3 className="text-sm font-extrabold text-[#111] mb-4">How to fund</h3>
           <div className="flex flex-col gap-3">
             {[
-              'Send NEAR tokens to the address above',
-              'Use any NEAR-compatible wallet or exchange',
-              'Minimum deposit: 0.1 NEAR',
-              'Funds appear instantly after confirmation',
+              'Send USDC from any supported chain — Ethereum, Base, Arbitrum, Solana',
+              'Use the chain selector above to get the right deposit address',
+              'Funds arrive via NEAR Intents bridge — typically within seconds',
+              'Minimum deposit: 1 USDC',
             ].map((step, i) => (
               <div key={step} className="flex items-start gap-3">
                 <div className="w-5 h-5 shrink-0 mt-0.5 rounded-full bg-[#29CEB4] border-2 border-[#111] flex items-center justify-center">

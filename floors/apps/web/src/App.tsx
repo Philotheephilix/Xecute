@@ -1,16 +1,22 @@
 import { useState, useRef, useEffect } from 'react';
 import Welcome from './screens/Welcome';
+import InviteCode from './screens/InviteCode';
 import CreatePasskey from './screens/CreatePasskey';
 import CreatingAccount from './screens/CreatingAccount';
 import AccountReady from './screens/AccountReady';
+import SetupDefaults from './screens/SetupDefaults';
+import EnableTrading from './screens/EnableTrading';
 import Fund from './screens/Fund';
 import Portfolio from './screens/Portfolio';
 
 export type Screen =
   | 'welcome'
+  | 'invite-code'
   | 'create-passkey'
   | 'creating-account'
   | 'account-ready'
+  | 'setup-defaults'
+  | 'enable-trading'
   | 'fund'
   | 'portfolio';
 
@@ -18,13 +24,20 @@ export interface AccountState {
   accountId: string;
   credentialId: string;
   publicKey: string;
+  /** 66-char hex-encoded compressed SEC1 P-256 public key (33 bytes) */
+  compressedKeyHex: string;
+  /** Invite code supplied during onboarding; present only when invite mode was active */
+  inviteCode?: string;
 }
 
 const SCREEN_ORDER: Screen[] = [
   'welcome',
+  'invite-code',
   'create-passkey',
   'creating-account',
   'account-ready',
+  'setup-defaults',
+  'enable-trading',
   'fund',
   'portfolio',
 ];
@@ -114,12 +127,18 @@ export default function App() {
     switch (s.screen) {
       case 'welcome':
         return <Welcome {...props} />;
+      case 'invite-code':
+        return <InviteCode {...props} />;
       case 'create-passkey':
         return <CreatePasskey {...props} />;
       case 'creating-account':
         return <CreatingAccount {...props} />;
       case 'account-ready':
         return <AccountReady {...props} />;
+      case 'setup-defaults':
+        return <SetupDefaults {...props} />;
+      case 'enable-trading':
+        return <EnableTrading {...props} />;
       case 'fund':
         return <Fund {...props} />;
       case 'portfolio':
