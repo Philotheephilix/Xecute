@@ -17,6 +17,7 @@ const RelayerConfigSchema = BaseConfigSchema.extend({
     .string()
     .regex(/^[0-9a-f]{64}$/, 'must be 64 hex chars')
     .default('7c2023ca3e3c53bf2309f9654180c8c516fb36cce5a18da8577e83c8f63ffd6b'),
+  FLOORS_CONTRACT: z.string().default('floors.floors-dev.testnet'),
 });
 
 export type RelayerConfig = z.infer<typeof RelayerConfigSchema>;
