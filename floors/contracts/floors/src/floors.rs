@@ -209,17 +209,24 @@ impl Contract {
                 floor_mut.status = FloorStatus::Active;
             }
 
-            // Revert totals: move pending back to reserved
+            let reserved_usdc = floor.reserved_usdc;
+            let surplus = reserved_usdc.saturating_sub(payout_usdc);
+
+            // Revert totals: move pending back to reserved (full reserved_usdc, not payout_usdc)
             {
                 let t = self.totals.entry(usdc_id.clone()).or_insert_with(Totals::default);
                 t.pending = t.pending.saturating_sub(payout_usdc);
-                t.reserved += payout_usdc;
+                t.reserved += reserved_usdc;
+                // The surplus was added to free when the payout was initiated; undo that.
+                t.free = t.free.saturating_sub(surplus);
             }
 
-            // Restore sleeve reservation
+            // Restore sleeve reservation (full reserved_usdc) and undo surplus that was
+            // moved to sleeve.free_usdc when the payout was initiated.
             {
                 if let Some(sleeve) = self.sleeves.get_mut(&floor.sleeve) {
-                    sleeve.reserved_usdc += payout_usdc;
+                    sleeve.reserved_usdc += reserved_usdc;
+                    sleeve.free_usdc = sleeve.free_usdc.saturating_sub(surplus);
                 }
             }
 
@@ -358,6 +365,12 @@ impl Contract {
             {
                 let t = self.totals.entry(floor.asset.clone()).or_insert_with(Totals::default);
                 t.escrow += qty_returned;
+            }
+            // Restore sleeve reservation (both close() and on_auth_close defer this;
+            // on failure the reserved_usdc was subtracted in the initiator but never
+            // released to free, so we must add it back to reserved).
+            if let Some(sleeve) = self.sleeves.get_mut(&floor.sleeve) {
+                sleeve.reserved_usdc += floor.reserved_usdc;
             }
             // Restore floor to Active.
             if let Some(floor_mut) = self.floors.get_mut(&floor_id) {

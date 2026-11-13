@@ -311,7 +311,7 @@ function BuyScreen({ state, onConfirm, onBack, onFloorChange }: BuyScreenProps) 
           <BackArrow />
         </button>
         <div style={{ flex: 1 }}>
-          <div style={{ fontSize: '13px', fontWeight: 600, color: '#5A2D0C', lineHeight: 1.2 }}>
+          <div style={{ fontSize: '13px', fontWeight: 600, color: '#111111', lineHeight: 1.2 }}>
             Buy Crypto
           </div>
           <div style={{ fontSize: '20px', fontWeight: 800, color: '#111111', lineHeight: 1.2 }}>
@@ -390,7 +390,7 @@ function BuyScreen({ state, onConfirm, onBack, onFloorChange }: BuyScreenProps) 
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <span style={{ fontSize: '12.5px', fontWeight: 600, color: '#6b7280' }}>Quote expires</span>
-                <span style={{ fontSize: '12px', fontWeight: 600, color: '#9ca3af' }}>
+                <span style={{ fontSize: '12px', fontWeight: 600, color: '#6b7280' }}>
                   {draftQuote.display.expires}
                 </span>
               </div>
@@ -424,7 +424,7 @@ function BuyScreen({ state, onConfirm, onBack, onFloorChange }: BuyScreenProps) 
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <span style={{ fontSize: '12px', fontWeight: 600, color: '#6b7280' }}>Quote ID</span>
-                    <span style={{ fontSize: '11px', fontWeight: 700, color: '#9ca3af', fontFamily: 'monospace' }}>
+                    <span style={{ fontSize: '11px', fontWeight: 700, color: '#6b7280', fontFamily: 'monospace' }}>
                       {draftQuote.quote_id.slice(0, 8)}...
                     </span>
                   </div>
@@ -468,7 +468,7 @@ function BuyScreen({ state, onConfirm, onBack, onFloorChange }: BuyScreenProps) 
             'Verifying...'
           ) : (
             <>
-              <span>Confirm with Face ID</span>
+              <span>Confirm with Passkey</span>
               <span role="img" aria-label="fingerprint">👆</span>
             </>
           )}
@@ -492,7 +492,7 @@ function SigningScreen({ statusId }: { statusId: string | null }) {
         Submitting Order...
       </div>
       {statusId !== null && (
-        <div style={{ fontSize: '12px', color: '#9ca3af' }} data-testid="status-id">
+        <div style={{ fontSize: '12px', color: '#6b7280' }} data-testid="status-id">
           {statusId}
         </div>
       )}
@@ -533,7 +533,7 @@ function SuccessScreen({ ticker, draftQuote, statusId, txHash, floorIncluded, fl
           style={{
             width: '96px',
             height: '96px',
-            background: '#E6FBF7',
+            background: 'white',
             border: '2px solid #111111',
             borderRadius: '50%',
             display: 'flex',
@@ -619,7 +619,7 @@ function SuccessScreen({ ticker, draftQuote, statusId, txHash, floorIncluded, fl
           {statusId !== null && (
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
               <span style={{ fontSize: '12px', fontWeight: 600, color: '#6b7280' }}>Order ID</span>
-              <span style={{ fontSize: '11px', fontWeight: 700, color: '#9ca3af', fontFamily: 'monospace' }} data-testid="status-id">
+              <span style={{ fontSize: '11px', fontWeight: 700, color: '#6b7280', fontFamily: 'monospace' }} data-testid="status-id">
                 {statusId.slice(0, 8)}...
               </span>
             </div>
@@ -628,7 +628,7 @@ function SuccessScreen({ ticker, draftQuote, statusId, txHash, floorIncluded, fl
           {txHash !== null && (
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
               <span style={{ fontSize: '12px', fontWeight: 600, color: '#6b7280' }}>Tx Hash</span>
-              <span style={{ fontSize: '11px', fontWeight: 700, color: '#9ca3af', fontFamily: 'monospace' }}>
+              <span style={{ fontSize: '11px', fontWeight: 700, color: '#6b7280', fontFamily: 'monospace' }}>
                 {txHash.slice(0, 10)}...
               </span>
             </div>
@@ -693,7 +693,7 @@ function PartialScreen({ ticker, draftQuote, floorError, actualQty, onAddFloor, 
           style={{
             width: '88px',
             height: '88px',
-            background: '#FFF7ED',
+            background: 'white',
             border: '2px solid #111111',
             borderRadius: '50%',
             display: 'flex',
@@ -740,7 +740,7 @@ function PartialScreen({ ticker, draftQuote, floorError, actualQty, onAddFloor, 
             <span style={{ fontSize: '16px', color: '#EF7B28', fontWeight: 800, lineHeight: '20px' }}>✗</span>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
               <span style={{ fontSize: '13px', fontWeight: 700, color: '#111111' }}>Floor wasn't added</span>
-              <span style={{ fontSize: '12px', fontWeight: 600, color: '#9ca3af' }}>
+              <span style={{ fontSize: '12px', fontWeight: 600, color: '#6b7280' }}>
                 Reason: {floorError}
               </span>
             </div>

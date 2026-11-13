@@ -146,7 +146,7 @@ export default function SetupDefaults({ navigate, className }: Props) {
 
         {/* Cost estimate */}
         {selectedBps > 0 && (
-          <p className="text-sm font-bold text-[#29CEB4]">
+          <p className="text-sm font-bold text-gray-600">
             Floor protection costs ~{costPct}% of your buy amount
           </p>
         )}

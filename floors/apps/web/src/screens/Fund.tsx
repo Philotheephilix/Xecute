@@ -17,11 +17,11 @@ interface ToastState {
 }
 
 const CHAIN_COLORS: Record<string, string> = {
-  NEAR: '#29CEB4',
+  NEAR: '#111111',
   Ethereum: '#9662FF',
-  Base: '#0052FF',
-  Arbitrum: '#28A0F0',
-  Solana: '#9945FF',
+  Base: '#9662FF',
+  Arbitrum: '#29CEB4',
+  Solana: '#EF7B28',
 };
 
 export default function Fund({ navigate, account, className }: Props) {

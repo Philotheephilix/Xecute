@@ -184,20 +184,23 @@ export async function signWithPasskey(
   credentialId: string,
 ): Promise<PasskeyAssertion> {
   // Decode base64url credential ID back to ArrayBuffer
-  const rawId = Uint8Array.from(
-    atob(credentialId.replace(/-/g, '+').replace(/_/g, '/')),
-    (c) => c.charCodeAt(0),
-  );
+  const allowCredentials =
+    credentialId !== undefined && credentialId !== ''
+      ? [
+          {
+            id: Uint8Array.from(
+              atob(credentialId.replace(/-/g, '+').replace(/_/g, '/')),
+              (c) => c.charCodeAt(0),
+            ),
+            type: 'public-key' as const,
+          },
+        ]
+      : [];
 
   const assertion = await navigator.credentials.get({
     publicKey: {
       challenge,
-      allowCredentials: [
-        {
-          id: rawId,
-          type: 'public-key' as const,
-        },
-      ],
+      allowCredentials,
       userVerification: 'required' as const,
       timeout: 60000,
     },

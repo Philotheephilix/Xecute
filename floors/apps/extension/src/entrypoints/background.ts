@@ -10,7 +10,7 @@ import { browser } from 'wxt/browser';
 import { z } from 'zod';
 import { MessageSchema } from '../content/messages.js';
 
-const API_URL = 'http://localhost:3001';
+const API_URL = (import.meta as ImportMeta & { env: Record<string, string> }).env['VITE_API_URL'] ?? 'http://localhost:3001';
 
 export default defineBackground(() => {
 

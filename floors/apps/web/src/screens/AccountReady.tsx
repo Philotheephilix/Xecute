@@ -25,7 +25,7 @@ export default function AccountReady({ navigate, account, className }: Props) {
   return (
     <div className={className}>
       {/* Hero orange gradient header */}
-      <div className="relative w-full bg-gradient-to-b from-[#ED7725] to-[#EF7B28] border-b-2 border-[#111] rounded-b-[28px] pt-14 px-6 pb-8 shadow-neo-lg overflow-hidden">
+      <div className="relative w-full bg-[#EF7B28] border-b-2 border-[#111] rounded-b-[28px] pt-14 px-6 pb-8 shadow-neo-lg overflow-hidden">
         {/* Cloud SVG watermark */}
         <svg
           className="absolute right-[-10px] bottom-[-20px] w-48 h-48 opacity-15 pointer-events-none"
@@ -54,7 +54,7 @@ export default function AccountReady({ navigate, account, className }: Props) {
         </div>
 
         <h1 className="text-3xl font-extrabold text-[#111] text-center">Account Ready!</h1>
-        <p className="text-base font-semibold text-[#2A1608] text-center mt-2">
+        <p className="text-base font-semibold text-[#111111] text-center mt-2">
           Your NEAR wallet is live and secured.
         </p>
       </div>

@@ -22,7 +22,7 @@ function formatDate(iso: string): string {
 function BadgeStatus({ status }: { status: Position['status'] }) {
   if (status === 'active') {
     return (
-      <span className="px-2 py-0.5 rounded-full text-[11px] font-extrabold bg-[#29CEB4] text-white border border-[#111]">
+      <span className="px-2 py-0.5 rounded-full text-[11px] font-extrabold bg-[#29CEB4] text-[#111] border border-[#111]">
         ACTIVE
       </span>
     );
@@ -41,7 +41,7 @@ function BadgeStatus({ status }: { status: Position['status'] }) {
   );
 }
 
-export default function Portfolio({ navigate, account, className }: Props) {
+export default function Portfolio({ navigate, account, setAccount, className }: Props) {
   useEffect(() => {
     if (!account) navigate('welcome');
   }, [account, navigate]);
@@ -149,9 +149,16 @@ export default function Portfolio({ navigate, account, className }: Props) {
         {/* Header row */}
         <div className="px-[18px] flex items-center justify-between relative z-10">
           <button
-            onClick={() => navigate('welcome')}
+            onClick={() => {
+              localStorage.removeItem('floors:account_id');
+              localStorage.removeItem('floors:credential_id');
+              localStorage.removeItem('floors:public_key');
+              localStorage.removeItem('floors:compressed_key');
+              setAccount(null);
+              navigate('welcome');
+            }}
             className="w-11 h-11 bg-white border-2 border-[#111] rounded-[13px] shadow-neo-sm shadow-neo-active flex items-center justify-center"
-            aria-label="Go back"
+            aria-label="Sign out"
           >
             <svg className="w-5 h-5 stroke-current fill-none stroke-[2.5]" viewBox="0 0 24 24">
               <line x1="19" y1="12" x2="5" y2="12" />
@@ -201,6 +208,7 @@ export default function Portfolio({ navigate, account, className }: Props) {
               onClick={action ?? undefined}
               disabled={comingSoon}
               title={comingSoon ? 'Coming soon' : undefined}
+              aria-label={comingSoon ? `${label} — coming soon` : label}
               className="h-[88px] bg-white rounded-[18px] border-2 border-[#111] shadow-neo flex flex-col items-center justify-center gap-2 shadow-neo-active disabled:opacity-40 disabled:cursor-not-allowed"
             >
               <svg className="w-6 h-6 stroke-current fill-none stroke-[2.2]" viewBox="0 0 24 24">
@@ -283,7 +291,7 @@ export default function Portfolio({ navigate, account, className }: Props) {
                       <button
                         onClick={() => handleAction('sell_to_floor', pos.floor_id)}
                         disabled={!!isBusy}
-                        className="flex-1 h-10 bg-[#29CEB4] text-white border-2 border-[#111] rounded-[10px] text-xs font-extrabold shadow-neo-sm shadow-neo-active disabled:opacity-50"
+                        className="flex-1 h-10 bg-[#29CEB4] text-[#111] border-2 border-[#111] rounded-[10px] text-xs font-extrabold shadow-neo-sm shadow-neo-active disabled:opacity-50"
                       >
                         {actionLoading === key + ':sell_to_floor' ? '…' : 'Sell to floor'}
                       </button>

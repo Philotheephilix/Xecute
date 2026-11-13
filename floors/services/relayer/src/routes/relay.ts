@@ -618,7 +618,7 @@ export function registerRelayRoutes(
       const outcome = await signingAccount.functionCall({
         contractId: floorsContract,
         methodName: 'expire',
-        args: { floor_ids: [floor_id] },
+        args: { ids: [floor_id] },
         gas: BigInt(30_000_000_000_000),
         attachedDeposit: BigInt(0),
       });
@@ -663,7 +663,7 @@ export function registerRelayRoutes(
         const outcome = await signingAccount.functionCall({
           contractId: floorsContract,
           methodName: 'expire',
-          args: { floor_ids: [floor_id] },
+          args: { ids: [floor_id] },
           gas: BigInt(30_000_000_000_000),
           attachedDeposit: BigInt(0),
         });
@@ -770,6 +770,7 @@ export function registerRelayRoutes(
    */
   const UnwindStartBodySchema = z.object({
     asset: z.string().regex(/^nep141:[a-z0-9_\-\.]{2,64}$/, 'must be a nep141: asset id'),
+    sleeve_id: z.string().min(1),
     qty: z.string().min(1),
     deposit_account: z.string().regex(/^[a-z0-9_\-\.]{2,64}$/, 'must be a valid NEAR account id'),
     min_usdc_out: z.string().min(1),
@@ -783,7 +784,7 @@ export function registerRelayRoutes(
       throw new FloorApiError('VALIDATION_ERROR', 'Invalid unwind-start request', false, 400, { issues: bodyResult.error.issues });
     }
 
-    const { asset, qty, deposit_account, min_usdc_out } = bodyResult.data;
+    const { asset, sleeve_id, qty, deposit_account, min_usdc_out } = bodyResult.data;
     const floorsContract = config.FLOORS_CONTRACT;
 
     logger.info({ asset, qty, deposit_account, event: 'unwind_start_start' }, 'Unwind start');
@@ -796,6 +797,7 @@ export function registerRelayRoutes(
         methodName: 'unwind_start',
         args: {
           asset,
+          sleeve_id,
           qty: qty.toString(),
           deposit_account,
           min_usdc_out: min_usdc_out.toString(),

@@ -298,6 +298,7 @@ export function registerQuoteRoutes(app: FastifyInstance, riskUrl: string): void
           floor_bps: floorBps,
           duration_secs: floorDurationSecs,
           owner: account_id ?? 'anonymous',
+          valid_until_ns: (BigInt(Date.now() + 30_000) * 1_000_000n).toString(),
         }),
         signal: AbortSignal.timeout(10_000),
       });

@@ -150,7 +150,6 @@ impl Contract {
         let qty = floor.qty;
         let reserved_usdc = floor.reserved_usdc;
         let asset = floor.asset.clone();
-        let sleeve_id = floor.sleeve.clone();
         let owner = floor.owner.clone();
 
         // Transition to ClosePending before transfer (reentrancy guard)
@@ -159,21 +158,17 @@ impl Contract {
             floor_mut.status = FloorStatus::ClosePending;
         }
 
-        // Update state synchronously before the transfer (mirrors floors.rs::close)
-        // Reduce escrow
+        // Mirrors floors.rs::close() — only subtract reserved and escrow now;
+        // free/sleeve adjustments are deferred to on_close_transfer (success path)
+        // so a concurrent mt_on_transfer cannot see inflated capacity.
+        {
+            let usdc_id = self.params.usdc.clone();
+            let t = self.totals.entry(usdc_id).or_insert_with(Totals::default);
+            t.reserved = t.reserved.saturating_sub(reserved_usdc);
+        }
         {
             let t = self.totals.entry(asset.clone()).or_insert_with(Totals::default);
             t.escrow = t.escrow.saturating_sub(qty);
-        }
-        // Return reserved USDC to sleeve free
-        {
-            let t = self.totals.entry(self.params.usdc.clone()).or_insert_with(Totals::default);
-            t.reserved = t.reserved.saturating_sub(reserved_usdc);
-            t.free += reserved_usdc;
-        }
-        if let Some(sleeve) = self.sleeves.get_mut(&sleeve_id) {
-            sleeve.reserved_usdc = sleeve.reserved_usdc.saturating_sub(reserved_usdc);
-            sleeve.free_usdc += reserved_usdc;
         }
 
         let intents = self.params.intents.clone();
