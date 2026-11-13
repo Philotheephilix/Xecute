@@ -4,6 +4,61 @@
  * for NEAR compatibility.
  */
 
+// ── Hex encoding ─────────────────────────────────────────────────────────────
+
+export function toHex(bytes: Uint8Array): string {
+  return Array.from(bytes)
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+// ── Compressed P-256 key extraction ──────────────────────────────────────────
+
+/**
+ * Extract a 33-byte compressed SEC1 P-256 public key from a SubjectPublicKeyInfo blob.
+ *
+ * SubjectPublicKeyInfo (DER) structure for P-256:
+ *   SEQUENCE {
+ *     SEQUENCE { OID (id-ecPublicKey), OID (P-256) }
+ *     BIT STRING { 0x00 [padding], 0x04 [uncompressed], X[32], Y[32] }
+ *   }
+ *
+ * The uncompressed marker 0x04 is followed by 32 bytes X then 32 bytes Y.
+ * We find the last occurrence of 0x04 (the point marker) where the remaining
+ * length is exactly 65 bytes (1 + 32 + 32), then compress to 02/03 + X.
+ */
+export function extractCompressedP256Key(subjectPublicKeyInfo: Uint8Array): Uint8Array {
+  // Find the uncompressed point marker 0x04 preceded by the BIT STRING padding byte.
+  // The last 65 bytes of the SPKI blob are: 0x04 + X[32] + Y[32]
+  const spki = subjectPublicKeyInfo;
+
+  // Search backwards for 0x04 where it's followed by exactly 64 more bytes
+  let markerIndex = -1;
+  for (let i = spki.length - 65; i >= 0; i--) {
+    if (spki[i] === 0x04 && i + 65 === spki.length) {
+      markerIndex = i;
+      break;
+    }
+  }
+
+  if (markerIndex === -1) {
+    throw new Error('Could not locate uncompressed P-256 point in SubjectPublicKeyInfo');
+  }
+
+  const x = spki.slice(markerIndex + 1, markerIndex + 33);
+  const y = spki[markerIndex + 64];
+
+  if (y === undefined) {
+    throw new Error('Malformed P-256 SubjectPublicKeyInfo: Y coordinate missing');
+  }
+
+  const prefix = (y & 1) === 0 ? 0x02 : 0x03;
+  const compressed = new Uint8Array(33);
+  compressed[0] = prefix;
+  compressed.set(x, 1);
+  return compressed;
+}
+
 // ── Base58 encoding ──────────────────────────────────────────────────────────
 
 const BASE58_ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';

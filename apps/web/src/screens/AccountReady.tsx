@@ -79,7 +79,15 @@ export default function AccountReady({ navigate, account, className }: Props) {
           ))}
         </div>
 
-        {/* Fund button */}
+        {/* Enable Trading → Fund button */}
+        <button
+          onClick={() => navigate('enable-trading')}
+          className="w-full h-14 bg-[#9662FF] text-white border-2 border-[#111] rounded-[13px] text-base font-extrabold shadow-neo shadow-neo-active"
+        >
+          Enable Trading
+        </button>
+
+        {/* Skip to fund */}
         <button
           onClick={() => navigate('fund')}
           className="w-full h-14 bg-[#29CEB4] text-[#111] border-2 border-[#111] rounded-[13px] text-base font-extrabold shadow-neo shadow-neo-active"

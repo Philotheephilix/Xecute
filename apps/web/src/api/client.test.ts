@@ -25,7 +25,7 @@ describe('createAccount', () => {
       }),
     );
 
-    const result = await createAccount('pubkey-base58', 'cred-id-123');
+    const result = await createAccount('02' + 'a'.repeat(64), 'cred-id-123');
     expect(result).toEqual({ account_id: '0stest123', created: true });
 
     expect(mockFetch).toHaveBeenCalledOnce();
@@ -34,7 +34,7 @@ describe('createAccount', () => {
     expect(opts.method).toBe('POST');
 
     const body = JSON.parse(opts.body as string) as Record<string, unknown>;
-    expect(body['public_key']).toBe('pubkey-base58');
+    expect(body['public_key_hex']).toBe('02' + 'a'.repeat(64));
     expect(body['credential_id']).toBe('cred-id-123');
   });
 
@@ -44,7 +44,7 @@ describe('createAccount', () => {
       new Response(JSON.stringify({ account_id: '0stest123', created: true }), { status: 200 }),
     );
 
-    await createAccount('pubkey', 'cred');
+    await createAccount('02' + 'b'.repeat(64), 'cred');
     const [, opts] = mockFetch.mock.calls[0] as [string, RequestInit];
     const headers = opts.headers as Record<string, string>;
     expect(headers['Idempotency-Key']).toBeDefined();
@@ -58,7 +58,7 @@ describe('createAccount', () => {
       }),
     );
 
-    await expect(createAccount('pk', 'cid')).rejects.toThrow('Account already exists');
+    await expect(createAccount('02' + 'c'.repeat(64), 'cid')).rejects.toThrow('Account already exists');
   });
 
   it('throws on invalid response shape', async () => {
@@ -67,7 +67,7 @@ describe('createAccount', () => {
       new Response(JSON.stringify({ unexpected: 'shape' }), { status: 200 }),
     );
 
-    await expect(createAccount('pk', 'cid')).rejects.toThrow();
+    await expect(createAccount('02' + 'd'.repeat(64), 'cid')).rejects.toThrow();
   });
 });
 

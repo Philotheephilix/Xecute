@@ -3,6 +3,7 @@ import Welcome from './screens/Welcome';
 import CreatePasskey from './screens/CreatePasskey';
 import CreatingAccount from './screens/CreatingAccount';
 import AccountReady from './screens/AccountReady';
+import EnableTrading from './screens/EnableTrading';
 import Fund from './screens/Fund';
 import Portfolio from './screens/Portfolio';
 
@@ -11,6 +12,7 @@ export type Screen =
   | 'create-passkey'
   | 'creating-account'
   | 'account-ready'
+  | 'enable-trading'
   | 'fund'
   | 'portfolio';
 
@@ -18,6 +20,8 @@ export interface AccountState {
   accountId: string;
   credentialId: string;
   publicKey: string;
+  /** 66-char hex-encoded compressed SEC1 P-256 public key (33 bytes) */
+  compressedKeyHex: string;
 }
 
 const SCREEN_ORDER: Screen[] = [
@@ -25,6 +29,7 @@ const SCREEN_ORDER: Screen[] = [
   'create-passkey',
   'creating-account',
   'account-ready',
+  'enable-trading',
   'fund',
   'portfolio',
 ];
@@ -120,6 +125,8 @@ export default function App() {
         return <CreatingAccount {...props} />;
       case 'account-ready':
         return <AccountReady {...props} />;
+      case 'enable-trading':
+        return <EnableTrading {...props} />;
       case 'fund':
         return <Fund {...props} />;
       case 'portfolio':

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { Screen, AccountState } from '../App';
-import { createPasskey } from '../lib/passkey';
+import { createPasskey, extractCompressedP256Key, toHex } from '../lib/passkey';
 import { createAccount } from '../api/client';
 
 interface Props {
@@ -18,9 +18,11 @@ export default function CreatePasskey({ navigate, setAccount, className }: Props
     setError(null);
     setLoading(true);
     try {
-      const { credentialId, publicKey } = await createPasskey();
-      const { account_id } = await createAccount(publicKey, credentialId);
-      setAccount({ accountId: account_id, credentialId, publicKey });
+      const { credentialId, publicKey, rawPublicKey } = await createPasskey();
+      const compressedKey = extractCompressedP256Key(rawPublicKey);
+      const compressedKeyHex = toHex(compressedKey);
+      const { account_id } = await createAccount(compressedKeyHex, credentialId);
+      setAccount({ accountId: account_id, credentialId, publicKey, compressedKeyHex });
       navigate('creating-account');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Passkey creation failed');
