@@ -79,23 +79,7 @@ export default function AccountReady({ navigate, account, className }: Props) {
           ))}
         </div>
 
-        {/* Set Up Defaults — primary onboarding CTA */}
-        <button
-          onClick={() => navigate('setup-defaults')}
-          className="w-full h-14 bg-[#29CEB4] text-white border-2 border-[#111] rounded-[13px] text-base font-extrabold shadow-neo shadow-neo-active"
-        >
-          🛡 Set Up Defaults
-        </button>
-
-        {/* Skip defaults → fund */}
-        <button
-          onClick={() => navigate('fund')}
-          className="w-full h-14 bg-white text-[#111] border-2 border-[#111] rounded-[13px] text-base font-extrabold shadow-neo-sm shadow-neo-active"
-        >
-          Skip for now
-        </button>
-
-        {/* Enable Trading */}
+        {/* Enable Trading → Fund button */}
         <button
           onClick={() => navigate('enable-trading')}
           className="w-full h-14 bg-[#9662FF] text-white border-2 border-[#111] rounded-[13px] text-base font-extrabold shadow-neo shadow-neo-active"
@@ -103,12 +87,20 @@ export default function AccountReady({ navigate, account, className }: Props) {
           Enable Trading
         </button>
 
-        {/* Open Portfolio button */}
+        {/* Skip to fund */}
+        <button
+          onClick={() => navigate('fund')}
+          className="w-full h-14 bg-[#29CEB4] text-[#111] border-2 border-[#111] rounded-[13px] text-base font-extrabold shadow-neo shadow-neo-active"
+        >
+          Fund Your Account
+        </button>
+
+        {/* Open extension button */}
         <button
           onClick={() => navigate('portfolio')}
           className="w-full h-14 bg-white text-[#111] border-2 border-[#111] rounded-[13px] text-base font-extrabold shadow-neo-sm shadow-neo-active"
         >
-          View Portfolio
+          Open Portfolio
         </button>
       </div>
     </div>

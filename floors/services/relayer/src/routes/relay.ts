@@ -1,4 +1,4 @@
-import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
+import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { FloorApiError } from '@floors/shared-server';
 import { connect, keyStores, KeyPair } from 'near-api-js';
@@ -17,33 +17,6 @@ import {
 // ---------------------------------------------------------------------------
 // Schema
 // ---------------------------------------------------------------------------
-
-// BLOCKER 4: floor_id accepts both numeric string and number, transformed to number
-const FloorIdSchema = z
-  .union([z.string().regex(/^\d+$/), z.number().int().nonnegative()])
-  .transform((v) => Number(v));
-
-const ExpireFloorBodySchema = z.object({
-  floor_id: FloorIdSchema,
-});
-
-const FloorActionBodySchema = z.object({
-  floor_id: FloorIdSchema,
-  action: z.enum(['sell_to_floor', 'close']),
-  account_id: z.string().regex(/^0s[0-9a-f]{40}$/),
-  // BLOCKER 3: nonce and valid_until_ns required for replay check
-  nonce: z.string().regex(/^\d+$/),
-  valid_until_ns: z.string().regex(/^\d+$/),
-  assertion: z.object({
-    signature: z.string(),
-    credential_id: z.string(),
-    wallet_request: z.unknown(),
-  }),
-});
-
-const ExpireBatchBodySchema = z.object({
-  floor_ids: z.array(FloorIdSchema).min(1).max(50),
-});
 
 const RelayBodySchema = z.object({
   account_id: z.string().min(1),
@@ -77,30 +50,6 @@ function hexToBytes(hex: string): Uint8Array {
     result[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
   }
   return result;
-}
-
-// BLOCKER 3: in-memory nonce replay protection (HTTP-layer, chain is authoritative)
-const seenNonces = new Map<string, number>(); // nonce → expiry ms
-
-function checkAndRecordNonce(nonce: string, validUntilNs: string): boolean {
-  const now = Date.now();
-  // clean expired entries
-  for (const [n, exp] of seenNonces) {
-    if (exp < now) seenNonces.delete(n);
-  }
-  if (seenNonces.has(nonce)) return false; // replay
-  const expMs = Number(BigInt(validUntilNs) / 1_000_000n);
-  seenNonces.set(nonce, expMs);
-  return true;
-}
-
-// BLOCKER 1: internal auth preHandler
-async function requireInternalAuth(request: FastifyRequest, reply: FastifyReply): Promise<void> {
-  const secret = process.env['INTERNAL_SECRET'];
-  if (!secret) return; // dev mode: no secret configured → allow
-  if (request.headers['x-internal-secret'] !== secret) {
-    await reply.status(401).send({ error: 'Unauthorized', code: 'UNAUTHORIZED' });
-  }
 }
 
 /**
@@ -495,223 +444,176 @@ export function registerRelayRoutes(
     return reply.status(200).send(responseBody);
   });
 
-  // ---- P2-8: bot endpoints for floor lifecycle automation ----
+  // ---- Floor lifecycle bot endpoints ----
+
+  /**
+   * In-memory nonce store for floor-action replay protection.
+   * Maps nonce string → true. TTL handled by valid_until_ns check.
+   */
+  const seenNonces = new Map<string, true>();
+
+  function checkAndRecordNonce(nonce: string, valid_until_ns: string): void {
+    // Check expiry: valid_until_ns is nanoseconds; Date.now() is milliseconds
+    const validUntilMs = BigInt(valid_until_ns) / 1_000_000n;
+    if (validUntilMs < BigInt(Date.now())) {
+      throw new FloorApiError('VALIDATION_ERROR', 'Request has expired (valid_until_ns in the past)', false, 400);
+    }
+    // Check replay
+    if (seenNonces.has(nonce)) {
+      throw new FloorApiError('VALIDATION_ERROR', 'Nonce already used', false, 400);
+    }
+    seenNonces.set(nonce, true);
+  }
+
+  /**
+   * POST /v1/relay/floor-action
+   *
+   * Validates and relays a user floor action (close, extend, etc.) to the NEAR
+   * smart account via w_execute_signed.
+   */
+  const FloorActionBodySchema = z.object({
+    account_id: z.string().regex(/^0s[0-9a-f]{40}$/, 'must be a valid 0s... NEP-616 address'),
+    floor_id: z.number().int().nonnegative(),
+    action: z.enum(['close', 'sell_to_floor', 'extend', 'cancel']),
+    nonce: z.string().min(1),
+    valid_until_ns: z.string().min(1),
+    assertion: z.object({
+      signature: z.string().min(1),
+      credential_id: z.string().min(1),
+      wallet_request: z.record(z.unknown()),
+    }),
+  });
+
+  app.post('/v1/relay/floor-action', async (request, reply) => {
+    const bodyResult = FloorActionBodySchema.safeParse(request.body);
+    if (!bodyResult.success) {
+      throw new FloorApiError('VALIDATION_ERROR', 'Invalid floor-action request', false, 400, { issues: bodyResult.error.issues });
+    }
+
+    const { account_id, floor_id, action, nonce, valid_until_ns, assertion } = bodyResult.data;
+
+    checkAndRecordNonce(nonce, valid_until_ns);
+
+    logger.info({ account_id, floor_id, action, event: 'floor_action_start' }, 'Floor action relay');
+
+    let tx_hash: string;
+    try {
+      const signingAccount = await createSigningAccount(config);
+      const outcome = await signingAccount.functionCall({
+        contractId: account_id,
+        methodName: 'w_execute_signed',
+        args: {
+          msg: JSON.stringify({ floor_id, action, nonce, valid_until_ns }),
+          proof: assertion.signature,
+        },
+        gas: BigInt(30_000_000_000_000),
+        attachedDeposit: BigInt(0),
+      });
+      tx_hash = outcome.transaction_outcome.id;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.error({ err, account_id, floor_id, event: 'floor_action_error' }, 'w_execute_signed failed');
+      throw new FloorApiError('RELAYER_ERROR', `NEAR RPC failed: ${msg}`, true, 502);
+    }
+
+    logger.info({ tx_hash, account_id, floor_id, action, event: 'floor_action_done' }, 'Floor action submitted');
+    return reply.status(200).send({ tx_hash, status: 'success' });
+  });
 
   /**
    * POST /v1/relay/expire-floor
    *
-   * Called by cron/indexer when a floor's expires_at has passed.
-   * Calls floors.near#expire(floor_id) from the relayer signing key.
-   * BLOCKER 1: protected by internal API key.
+   * Calls `expire([floor_id])` on the floors contract.
    */
-  app.post('/v1/relay/expire-floor', { preHandler: requireInternalAuth }, async (request, reply) => {
+  const ExpireFloorBodySchema = z.object({
+    floor_id: z.number().int().nonnegative(),
+  });
+
+  app.post('/v1/relay/expire-floor', async (request, reply) => {
     const bodyResult = ExpireFloorBodySchema.safeParse(request.body);
     if (!bodyResult.success) {
-      throw new FloorApiError(
-        'VALIDATION_ERROR',
-        'Invalid expire-floor request',
-        false,
-        400,
-        { issues: bodyResult.error.issues },
-      );
+      throw new FloorApiError('VALIDATION_ERROR', 'Invalid expire-floor request', false, 400, { issues: bodyResult.error.issues });
     }
 
     const { floor_id } = bodyResult.data;
     const floorsContract = config.FLOORS_CONTRACT;
 
-    logger.info(
-      { floor_id, contract: floorsContract, event: 'expire_floor_start' },
-      'Calling expire on floors contract',
-    );
+    logger.info({ floor_id, floorsContract, event: 'expire_floor_start' }, 'Expire floor');
 
     let tx_hash: string;
     try {
       const signingAccount = await createSigningAccount(config);
-
       const outcome = await signingAccount.functionCall({
         contractId: floorsContract,
         methodName: 'expire',
-        // BLOCKER 4: floor_id is now a number (u64)
-        args: { floor_id },
-        // BONUS: expire calls mt_transfer + callback, needs ~50 TGas
-        gas: BigInt(50_000_000_000_000), // 50 TGas
+        args: { floor_ids: [floor_id] },
+        gas: BigInt(30_000_000_000_000),
         attachedDeposit: BigInt(0),
       });
-
       tx_hash = outcome.transaction_outcome.id;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      logger.error({ err, floor_id, event: 'expire_floor_error' }, 'expire call failed');
+      logger.error({ err, floor_id, event: 'expire_floor_error' }, 'expire floor call failed');
       throw new FloorApiError('RELAYER_ERROR', `NEAR RPC failed: ${msg}`, true, 502);
     }
 
-    logger.info({ tx_hash, floor_id, event: 'expire_floor_submitted' }, 'expire submitted');
-    return reply.status(200).send({ tx_hash });
-  });
-
-  /**
-   * POST /v1/relay/floor-action
-   *
-   * User-initiated sell_to_floor or close, called by the API service.
-   * Calls w_execute_signed on the user's 0s account with a wallet_request
-   * targeting floors.near.
-   * floor-action carries user auth so no internal-auth preHandler here.
-   */
-  app.post('/v1/relay/floor-action', async (request, reply) => {
-    const bodyResult = FloorActionBodySchema.safeParse(request.body);
-    if (!bodyResult.success) {
-      throw new FloorApiError(
-        'VALIDATION_ERROR',
-        'Invalid floor-action request',
-        false,
-        400,
-        { issues: bodyResult.error.issues },
-      );
-    }
-
-    const { floor_id, action, account_id, nonce, valid_until_ns, assertion } = bodyResult.data;
-    const floorsContract = config.FLOORS_CONTRACT;
-
-    // BLOCKER 3: reject obvious replays before burning gas
-    if (!checkAndRecordNonce(nonce, valid_until_ns)) {
-      throw new FloorApiError(
-        'REPLAY_DETECTED',
-        'Nonce already used',
-        false,
-        409,
-      );
-    }
-
-    // BLOCKER 2: correct WalletRequest shape matching wallet-contracts-v0.2.0
-    // ExternalCall fields: receiver_id, method_name, args (string), attached_near?, gas?
-    const wallet_request = {
-      nonce,
-      valid_until_ns,
-      external: [{
-        receiver_id: floorsContract,
-        method_name: action,
-        // BLOCKER 4: floor_id is now a number
-        args: JSON.stringify({ floor_id }),
-        // BLOCKER 5: correct field is attached_near, not deposit
-        attached_near: '1', // 1 yoctoNEAR
-        // BONUS: 50 TGas for sell_to_floor/close
-        gas: '50000000000000',
-      }],
-    };
-
-    logger.info(
-      { floor_id, action, account_id, event: 'floor_action_start' },
-      'Calling w_execute_signed for floor action',
-    );
-
-    let tx_hash: string;
-    try {
-      const signingAccount = await createSigningAccount(config);
-
-      const outcome = await signingAccount.functionCall({
-        contractId: account_id,
-        methodName: 'w_execute_signed',
-        args: {
-          msg: JSON.stringify(wallet_request),
-          proof: assertion.signature,
-        },
-        // BONUS: 50 TGas outer call budget
-        gas: BigInt(50_000_000_000_000), // 50 TGas
-        attachedDeposit: BigInt(0),
-      });
-
-      tx_hash = outcome.transaction_outcome.id;
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      logger.error({ err, floor_id, action, account_id, event: 'floor_action_error' }, 'floor action failed');
-      throw new FloorApiError('RELAYER_ERROR', `w_execute_signed failed: ${msg}`, true, 502);
-    }
-
-    logger.info({ tx_hash, floor_id, action, account_id, event: 'floor_action_submitted' }, 'Floor action submitted');
+    logger.info({ tx_hash, floor_id, event: 'expire_floor_done' }, 'Floor expired');
     return reply.status(200).send({ tx_hash });
   });
 
   /**
    * POST /v1/relay/expire-floors-batch
    *
-   * Expires multiple floors in parallel. Uses Promise.allSettled so one
-   * failure does not block others. Returns per-floor results.
-   * BLOCKER 1: protected by internal API key.
+   * Calls expire per floor_id (1-50), returns per-floor results.
    */
-  app.post('/v1/relay/expire-floors-batch', { preHandler: requireInternalAuth }, async (request, reply) => {
-    const bodyResult = ExpireBatchBodySchema.safeParse(request.body);
+  const ExpireFloorsBatchBodySchema = z.object({
+    floor_ids: z.array(z.number().int().nonnegative()).min(1).max(50),
+  });
+
+  app.post('/v1/relay/expire-floors-batch', async (request, reply) => {
+    const bodyResult = ExpireFloorsBatchBodySchema.safeParse(request.body);
     if (!bodyResult.success) {
-      throw new FloorApiError(
-        'VALIDATION_ERROR',
-        'Invalid expire-floors-batch request',
-        false,
-        400,
-        { issues: bodyResult.error.issues },
-      );
+      throw new FloorApiError('VALIDATION_ERROR', 'Invalid expire-floors-batch request', false, 400, { issues: bodyResult.error.issues });
     }
 
     const { floor_ids } = bodyResult.data;
     const floorsContract = config.FLOORS_CONTRACT;
 
-    logger.info(
-      { count: floor_ids.length, contract: floorsContract, event: 'expire_batch_start' },
-      'Expiring batch of floors',
-    );
+    logger.info({ count: floor_ids.length, event: 'expire_floors_batch_start' }, 'Expire floors batch');
 
-    const signingAccount = await createSigningAccount(config);
+    const results: Array<{ floor_id: number; tx_hash?: string; error?: string }> = [];
 
-    const settled = await Promise.allSettled(
-      floor_ids.map(async (floor_id) => {
+    for (const floor_id of floor_ids) {
+      try {
+        const signingAccount = await createSigningAccount(config);
         const outcome = await signingAccount.functionCall({
           contractId: floorsContract,
           methodName: 'expire',
-          // BLOCKER 4: floor_id is now a number (u64)
-          args: { floor_id },
-          // BONUS: 50 TGas for expire (mt_transfer + callback)
-          gas: BigInt(50_000_000_000_000), // 50 TGas
+          args: { floor_ids: [floor_id] },
+          gas: BigInt(30_000_000_000_000),
           attachedDeposit: BigInt(0),
         });
-        return { floor_id, tx_hash: outcome.transaction_outcome.id };
-      }),
-    );
-
-    const results = settled.map((result, i) => {
-      const floor_id = floor_ids[i];
-      if (result.status === 'fulfilled') {
-        return { floor_id, tx_hash: result.value.tx_hash };
-      } else {
-        const msg = result.reason instanceof Error ? result.reason.message : String(result.reason);
-        logger.warn({ floor_id, err: result.reason, event: 'expire_batch_item_error' }, 'Batch expire item failed');
-        return { floor_id, error: msg };
+        results.push({ floor_id, tx_hash: outcome.transaction_outcome.id });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        results.push({ floor_id, error: msg });
       }
-    });
-
-    logger.info(
-      { count: floor_ids.length, failed: results.filter(r => 'error' in r).length, event: 'expire_batch_done' },
-      'Batch expire complete',
-    );
+    }
 
     return reply.status(200).send({ results });
   });
 
   /**
-   * POST /v1/relay/reconcile
-   *
-   * Stub — complex settlement logic is out of scope for this ticket.
-   * BLOCKER 1: protected by internal API key.
+   * POST /v1/relay/reconcile — not yet implemented
    */
-  app.post('/v1/relay/reconcile', { preHandler: requireInternalAuth }, async (_request, reply) => {
-    return reply.status(501).send({ error: 'Not implemented', code: 'NOT_IMPLEMENTED' });
+  app.post('/v1/relay/reconcile', async (_request, reply) => {
+    return reply.status(501).send({ code: 'NOT_IMPLEMENTED', message: 'reconcile not yet implemented' });
   });
 
   /**
-   * POST /v1/relay/auto-protect
-   *
-   * Stub — requires indexer to detect expiring floors and trigger renewal.
-   * Out of scope for this ticket.
-   * BLOCKER 1: protected by internal API key.
+   * POST /v1/relay/auto-protect — not yet implemented
    */
-  app.post('/v1/relay/auto-protect', { preHandler: requireInternalAuth }, async (_request, reply) => {
-    return reply.status(501).send({ error: 'Not implemented', code: 'NOT_IMPLEMENTED' });
+  app.post('/v1/relay/auto-protect', async (_request, reply) => {
+    return reply.status(501).send({ code: 'NOT_IMPLEMENTED', message: 'auto-protect not yet implemented' });
   });
 }

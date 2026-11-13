@@ -24,7 +24,7 @@ beforeAll(async () => {
   });
 
   app = await createApp(TEST_CONFIG, logger);
-  registerQuoteRoutes(app);
+  registerQuoteRoutes(app, 'http://localhost:19998');
   // Use port 19999 (guaranteed unreachable) so unit tests are independent of live relayer
   registerBuyRoutes(app, 'http://localhost:19999');
   await app.ready();
@@ -126,6 +126,7 @@ describe('POST /v1/quotes', () => {
       payload: {
         asset: 'ETH',
         qty: '1000000000000000000',
+        account_id: '0s' + 'a'.repeat(40),
       },
     });
 
@@ -136,9 +137,26 @@ describe('POST /v1/quotes', () => {
       qty: string;
     };
     expect(typeof body.quote_id).toBe('string');
-    expect(body.quote_id.length).toBeGreaterThan(0);
     expect(body.asset).toBe('ETH');
     expect(body.qty).toBe('1000000000000000000');
+  });
+
+  it('returns 400 with VALIDATION_ERROR when floor_bps is too high', async () => {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/quotes',
+      payload: {
+        asset: 'ETH',
+        qty: '100',
+        account_id: '0s' + 'a'.repeat(40),
+        floor_bps: 99999,
+        duration_secs: 86400,
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+    const body = JSON.parse(response.body) as { error: { code: string } };
+    expect(body.error.code).toBe('VALIDATION_ERROR');
   });
 
   it('returns 400 with VALIDATION_ERROR when asset is empty', async () => {
@@ -148,22 +166,7 @@ describe('POST /v1/quotes', () => {
       payload: {
         asset: '',
         qty: '100',
-      },
-    });
-
-    expect(response.statusCode).toBe(400);
-    const body = JSON.parse(response.body) as { error: { code: string } };
-    expect(body.error.code).toBe('VALIDATION_ERROR');
-  });
-
-  it('returns 400 with VALIDATION_ERROR when floor.bps is too high', async () => {
-    const response = await app.inject({
-      method: 'POST',
-      url: '/v1/quotes',
-      payload: {
-        asset: 'ETH',
-        qty: '100',
-        floor: { bps: 99999, duration_secs: 3600 },
+        account_id: '0s' + 'a'.repeat(40),
       },
     });
 

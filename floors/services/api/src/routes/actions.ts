@@ -53,7 +53,7 @@ async function handleFloorAction(
   db: postgres.Sql,
   relayerUrl: string,
   log: import('fastify').FastifyBaseLogger,
-): Promise<string> {
+): Promise<{ statusId: string; nonce: string; valid_until_ns: string }> {
   // Insert pending submission record
   const rows = await db<BuySubmissionRow[]>`
     INSERT INTO api.buy_submissions
@@ -75,6 +75,12 @@ async function handleFloorAction(
     throw new FloorApiError('INTERNAL_ERROR', 'Failed to create action record', false, 500);
   }
 
+  // Generate nonce (digits-only, matches relayer /^\d+$/ requirement) and valid_until_ns
+  // Use a combination of timestamp-ns + 6 random decimal digits for uniqueness
+  const randomSuffix = Math.floor(Math.random() * 1_000_000).toString().padStart(6, '0');
+  const nonce = (BigInt(Date.now()) * 1_000_000n).toString() + randomSuffix;
+  const valid_until_ns = (BigInt(Date.now() + 300_000) * 1_000_000n).toString();
+
   // Fire-and-forget: call relayer
   const doRelay = async () => {
     try {
@@ -85,6 +91,8 @@ async function handleFloorAction(
           floor_id,
           action,
           account_id,
+          nonce,
+          valid_until_ns,
           assertion: {
             signature,
             credential_id,
@@ -125,7 +133,7 @@ async function handleFloorAction(
   // Intentionally not awaited
   void doRelay();
 
-  return statusId;
+  return { statusId, nonce, valid_until_ns };
 }
 
 // ---------------------------------------------------------------------------
@@ -159,7 +167,7 @@ export function registerActionsRoutes(
 
     request.log.info({ floor_id, action, account_id, event: 'floor_action_received' }, 'Floor action received');
 
-    const statusId = await handleFloorAction(
+    const { statusId } = await handleFloorAction(
       action,
       floor_id,
       account_id,
@@ -195,7 +203,7 @@ export function registerActionsRoutes(
 
     request.log.info({ floor_id, account_id, event: 'sell_received' }, 'Sell (floor action) received');
 
-    const statusId = await handleFloorAction(
+    const { statusId } = await handleFloorAction(
       'sell_to_floor',
       floor_id,
       account_id,

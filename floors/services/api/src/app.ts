@@ -7,8 +7,6 @@ import { registerQuoteRoutes } from './routes/quotes.js';
 import { registerBuyRoutes } from './routes/buy.js';
 import { registerSubmitRoutes } from './routes/submit.js';
 import { registerInviteRoutes } from './routes/invites.js';
-import { registerActionsRoutes } from './routes/actions.js';
-import { registerSuggestionsRoutes } from './routes/suggestions.js';
 
 export async function buildApp(
   config: ApiConfig & BaseConfig,
@@ -23,8 +21,6 @@ export async function buildApp(
   registerQuoteRoutes(app, config.RISK_URL);
   registerBuyRoutes(app, config.RELAYER_URL);
   registerSubmitRoutes(app, db, config.RELAYER_URL);
-  registerActionsRoutes(app, db, config.RELAYER_URL);
-  registerSuggestionsRoutes(app, db);
 
   return app;
 }

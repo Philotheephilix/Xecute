@@ -13,9 +13,7 @@ const CreateAccountBodySchema = z.object({
   // compressed P-256 public key as hex (66 hex chars = 33 bytes, SEC1 compressed)
   public_key_hex: z.string().regex(/^[0-9a-f]{66}$/, 'must be 66 hex chars (compressed SEC1 P-256)'),
   credential_id: z.string().min(1),
-  // Allow mixed-case input; handler normalises to upper before DB query.
-  // Alphabet: ABCDEFGHJKLMNPQRSTUVWXYZ23456789 (no I/O/0/1)
-  invite_code: z.string().regex(/^[A-HJ-NP-Z2-9]{8}$/i, 'invite_code must be 8 chars from the invite alphabet').optional(),
+  invite_code: z.string().min(1).max(8).optional(),
 });
 
 const IdempotencyKeyHeader = z.string().uuid();
@@ -108,6 +106,14 @@ export function registerAccountRoutes(app: FastifyInstance, db: postgres.Sql, re
       if (invite_code === undefined || invite_code === '') {
         throw new FloorApiError('INVALID_INVITE', 'An invite code is required', false, 400);
       }
+
+      const upperCode = invite_code.toUpperCase();
+      const codeRows = await db<Array<{ used_at: Date | null }>>`
+        SELECT used_at FROM api.invite_codes WHERE code = ${upperCode}
+      `;
+      if (codeRows.length === 0 || codeRows[0] === undefined || codeRows[0].used_at !== null) {
+        throw new FloorApiError('INVALID_INVITE', 'Invalid or already used invite code', false, 400);
+      }
     }
 
     // Derive NEP-616 deterministic account ID from the compressed P-256 public key
@@ -115,23 +121,6 @@ export function registerAccountRoutes(app: FastifyInstance, db: postgres.Sql, re
     const account_id = deriveAddress(compressedKey);
 
     request.log.info({ account_id, public_key_hex: public_key_hex.slice(0, 16) + '...', event: 'account_address_derived' });
-
-    // Atomically claim the invite code (validate + mark used in one UPDATE).
-    // This eliminates the TOCTOU race that existed with the old SELECT-then-UPDATE pattern.
-    // Must happen before the account INSERT so that a duplicate-key conflict on the account
-    // doesn't leave the code burned without an account being created.
-    if (inviteModeOn && invite_code !== undefined) {
-      const upperCode = invite_code.toUpperCase();
-      const claimed = await db<Array<{ code: string }>>`
-        UPDATE api.invite_codes
-        SET used_at = NOW(), used_by = ${account_id}
-        WHERE code = ${upperCode} AND used_at IS NULL
-        RETURNING code
-      `;
-      if (claimed.length === 0) {
-        throw new FloorApiError('INVALID_INVITE', 'Invalid or already used invite code', false, 400);
-      }
-    }
 
     // Check if account already exists in DB
     const existing = await db<AccountRow[]>`
@@ -146,6 +135,16 @@ export function registerAccountRoutes(app: FastifyInstance, db: postgres.Sql, re
         ON CONFLICT (account_id) DO NOTHING
       `;
       created = true;
+
+      // Mark the invite code as redeemed if one was provided.
+      if (inviteModeOn && invite_code !== undefined) {
+        const upperCode = invite_code.toUpperCase();
+        await db`
+          UPDATE api.invite_codes
+          SET used_at = NOW(), used_by = ${account_id}
+          WHERE code = ${upperCode} AND used_at IS NULL
+        `;
+      }
 
       // Fire-and-forget: ask the relayer to create the account on-chain.
       // The address is deterministic so the user can retry if this fails.

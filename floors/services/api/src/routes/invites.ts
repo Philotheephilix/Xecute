@@ -4,9 +4,7 @@ import { FloorApiError } from '@floors/shared-server';
 import type postgres from 'postgres';
 
 const ValidateInviteBodySchema = z.object({
-  // Allow mixed-case input; handler normalises to upper before DB query.
-  // Alphabet: ABCDEFGHJKLMNPQRSTUVWXYZ23456789 (no I/O/0/1)
-  code: z.string().regex(/^[A-HJ-NP-Z2-9]{8}$/i, 'code must be 8 chars from the invite alphabet (A-Z excluding I/O, 2-9)'),
+  code: z.string().min(1).max(8),
 });
 
 interface InviteCodeRow {

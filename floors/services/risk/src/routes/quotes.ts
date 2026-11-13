@@ -6,12 +6,6 @@ import { signQuote, loadSigningKey, generateQuoteId, type QuotePayload } from '.
 import { hasCapacity, reserveCapacity } from '../capacity.js';
 
 // ---------------------------------------------------------------------------
-// Key ID constant (identifies which signing key was used; registered on-chain)
-// ---------------------------------------------------------------------------
-
-const RISK_KEY_ID = process.env['RISK_KEY_ID'] ?? 'risk-v1';
-
-// ---------------------------------------------------------------------------
 // Asset configuration
 // ---------------------------------------------------------------------------
 
@@ -110,7 +104,8 @@ async function fetchPythPrice(asset: string): Promise<PythPrice> {
 // Route handler
 // ---------------------------------------------------------------------------
 
-async function quoteHandler(request: import('fastify').FastifyRequest, reply: import('fastify').FastifyReply): Promise<void> {
+export function registerRiskQuoteRoutes(app: FastifyInstance): void {
+  app.post('/v1/risk/quote', async (request, reply) => {
     const bodyResult = QuoteRequestSchema.safeParse(request.body);
     if (!bodyResult.success) {
       throw new FloorApiError('VALIDATION_ERROR', 'Invalid quote request', false, 400, {
@@ -182,7 +177,7 @@ async function quoteHandler(request: import('fastify').FastifyRequest, reply: im
     // notional_e6 = ceil(qty * floor_price_e6 / 10^token_decimals)
     const notional_e6 = (qtyBigint * floor_price_e6 + divisor - 1n) / divisor;
 
-    if (!hasCapacity(asset, notional_e6)) {
+    if (!hasCapacity(asset, notional_e6, owner)) {
       throw new FloorApiError('RATE_LIMITED', 'Sleeve capacity exceeded for this asset', false, 400);
     }
 
@@ -212,7 +207,7 @@ async function quoteHandler(request: import('fastify').FastifyRequest, reply: im
     // -----------------------------------------------------------------------
     // 6. Reserve capacity for this in-flight quote (TTL = 20 s)
     // -----------------------------------------------------------------------
-    reserveCapacity(quoteIdHex, asset, notional_e6, 20_000);
+    reserveCapacity(quoteIdHex, asset, notional_e6, 20_000, owner);
 
     // -----------------------------------------------------------------------
     // 7. Log and respond
@@ -231,29 +226,14 @@ async function quoteHandler(request: import('fastify').FastifyRequest, reply: im
     );
 
     return reply.status(200).send({
-      v: '1',
       quote_id: quoteIdHex,
-      owner,
-      asset,
-      qty,
-      floor_bps,
-      duration_secs,
       floor_price_e6: floor_price_e6.toString(),
       fee_usdc: fee_e6.toString(),
-      sleeve,
-      expires_at: Number(expiresAt),                              // seconds (for signing payload)
-      expires_at_ns: (BigInt(expiresAt) * 1_000_000_000n).toString(), // nanoseconds (for FloorQuote)
       sig: sigBase64,
-      key_id: RISK_KEY_ID,
+      sleeve,
+      expires_at: Number(expiresAt),
+      asset,
+      qty,
     });
-}
-
-// ---------------------------------------------------------------------------
-// Route registration — both paths serve the same handler
-// ---------------------------------------------------------------------------
-
-export function registerRiskQuoteRoutes(app: FastifyInstance): void {
-  app.post('/v1/risk/quote', quoteHandler);
-  // Alias at the spec-defined internal path (doc 32 §7)
-  app.post('/internal/floor-quotes', quoteHandler);
+  });
 }

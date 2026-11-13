@@ -12,9 +12,6 @@ import { randomBytes } from 'node:crypto';
 // QuotePayload definition (matches Rust contract Borsh layout)
 // ---------------------------------------------------------------------------
 
-// NOTE: expires_at is Unix seconds (not nanoseconds).
-// The on-chain FloorQuote.expires_at_ns field is nanoseconds, but the signing
-// payload uses seconds for compactness. The Rust validate_quote_sig must match.
 export interface QuotePayload {
   /** 32 bytes random quote ID */
   id: Uint8Array;
