@@ -174,6 +174,7 @@ impl Contract {
     pub fn unwind_start(
         &mut self,
         asset: String,
+        sleeve_id: String,
         qty: U128,
         deposit_account: AccountId,
         min_usdc_out: U128,
@@ -217,11 +218,13 @@ impl Contract {
             t.unwinding += qty_u;
         }
 
-        // Create unwind record
-        let unwind_id = self.unwinds.len() as u64;
+        // Create unwind record (Fix 1: monotonic id — never reuse ids from failed unwinds)
+        let unwind_id = self.next_unwind_id;
+        self.next_unwind_id += 1;
         let unwind = Unwind {
             id: unwind_id,
             asset: asset.clone(),
+            sleeve_id: sleeve_id.clone(),
             qty: qty_u,
             deposit_account: deposit_account.clone(),
             min_usdc_out: min_usdc,
@@ -346,12 +349,23 @@ impl Contract {
             t.unwinding = t.unwinding.saturating_sub(unwind.qty);
         }
 
-        // Credit sleeve free_usdc with the proceeds.
-        // USDC arrives back through mt_on_transfer which already credits held/free;
-        // here we only credit the sleeve's free_usdc allocation.
-        // DO NOT touch totals[usdc].held — that is handled by mt_on_transfer.
-        if let Some(sleeve) = self.sleeves.get_mut(&"majors".to_string()) {
+        // Credit the correct sleeve's free_usdc with the proceeds (Fix 2: use sleeve_id
+        // from the unwind record instead of hardcoding "majors").
+        if let Some(sleeve) = self.sleeves.get_mut(&unwind.sleeve_id) {
             sleeve.free_usdc = sleeve.free_usdc.saturating_add(proceeds);
+        }
+
+        // Update USDC totals to reflect proceeds arriving (Fix 3: totals were not updated).
+        let usdc_id = self.params.usdc.clone();
+        if let Some(usdc_totals) = self.totals.get_mut(&usdc_id) {
+            usdc_totals.held = usdc_totals.held.saturating_add(proceeds);
+            usdc_totals.free = usdc_totals.free.saturating_add(proceeds);
+        }
+        {
+            let usdc_id = self.params.usdc.clone();
+            if let Some(t) = self.totals.get(&usdc_id) {
+                t.assert_usdc_solvent();
+            }
         }
 
         if proceeds < unwind.min_usdc_out {
@@ -533,6 +547,7 @@ mod tests {
             credits: near_sdk::store::LookupMap::new(crate::StorageKey::Credits),
             totals: near_sdk::store::LookupMap::new(crate::StorageKey::Totals),
             unwinds: near_sdk::store::IterableMap::new(crate::StorageKey::Unwinds),
+            next_unwind_id: 0,
             pending_changes: near_sdk::store::Vector::new(crate::StorageKey::PendingChanges),
         }
     }
@@ -678,6 +693,7 @@ mod tests {
             Unwind {
                 id: unwind_id,
                 asset: asset_id.clone(),
+                sleeve_id: "majors".to_string(),
                 qty,
                 deposit_account: deposit,
                 min_usdc_out: 400,

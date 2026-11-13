@@ -71,7 +71,7 @@ const RECONCILE_ASSETS = [
   'nep141:starknet.omft.near',
 ];
 
-setInterval(async () => {
+const reconcileInterval = setInterval(async () => {
   for (const asset of RECONCILE_ASSETS) {
     try {
       const signingAccount = await createSigningAccount(config);
@@ -91,3 +91,4 @@ setInterval(async () => {
     }
   }
 }, 5 * 60 * 1000);
+reconcileInterval.unref();

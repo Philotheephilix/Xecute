@@ -198,7 +198,7 @@ describe('floor lifecycle bot endpoints', () => {
 
   // ---- stubs ----
 
-  test('reconcile returns 501', async () => {
+  test('reconcile returns 400 when asset field is missing', async () => {
     // Build a minimal app just for stub tests (no NEAR key needed)
     const logger = pino({ level: 'silent' });
     const stubApp = fastify({ logger: false });
@@ -224,14 +224,14 @@ describe('floor lifecycle bot endpoints', () => {
     await stubApp.ready();
 
     const res = await stubApp.inject({ method: 'POST', url: '/v1/relay/reconcile', body: {} });
-    expect(res.statusCode).toBe(501);
+    expect(res.statusCode).toBe(400);
     const body = JSON.parse(res.body) as { code: string };
-    expect(body.code).toBe('NOT_IMPLEMENTED');
+    expect(body.code).toBe('VALIDATION_ERROR');
 
     await stubApp.close();
   });
 
-  test('auto-protect returns 501', async () => {
+  test('auto-protect returns 400 when floor_id field is missing', async () => {
     const logger = pino({ level: 'silent' });
     const stubApp = fastify({ logger: false });
     const stubConfig = {
@@ -255,9 +255,9 @@ describe('floor lifecycle bot endpoints', () => {
     await stubApp.ready();
 
     const res = await stubApp.inject({ method: 'POST', url: '/v1/relay/auto-protect', body: {} });
-    expect(res.statusCode).toBe(501);
+    expect(res.statusCode).toBe(400);
     const body = JSON.parse(res.body) as { code: string };
-    expect(body.code).toBe('NOT_IMPLEMENTED');
+    expect(body.code).toBe('VALIDATION_ERROR');
 
     await stubApp.close();
   });

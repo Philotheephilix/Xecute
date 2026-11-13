@@ -239,6 +239,7 @@ pub enum UnwindStatus {
 pub struct Unwind {
     pub id: u64,
     pub asset: String,
+    pub sleeve_id: String,
     pub qty: u128,
     pub deposit_account: AccountId,
     pub min_usdc_out: u128,

@@ -50,6 +50,7 @@ pub struct Contract {
     credits: LookupMap<(AccountId, String), u128>,
     totals: LookupMap<String, state::Totals>,
     unwinds: IterableMap<u64, state::Unwind>,
+    next_unwind_id: u64,
     pending_changes: Vector<state::PendingChange>,
 }
 
@@ -85,6 +86,7 @@ impl Contract {
             credits: LookupMap::new(StorageKey::Credits),
             totals: LookupMap::new(StorageKey::Totals),
             unwinds: IterableMap::new(StorageKey::Unwinds),
+            next_unwind_id: 0,
             pending_changes: Vector::new(StorageKey::PendingChanges),
         }
     }
@@ -137,6 +139,7 @@ mod tests {
             credits: near_sdk::store::LookupMap::new(StorageKey::Credits),
             totals: near_sdk::store::LookupMap::new(StorageKey::Totals),
             unwinds: near_sdk::store::IterableMap::new(StorageKey::Unwinds),
+            next_unwind_id: 0,
             pending_changes: near_sdk::store::Vector::new(StorageKey::PendingChanges),
         }
     }
@@ -728,6 +731,7 @@ mod tests {
             contract.unwinds.insert(i, Unwind {
                 id: i,
                 asset: "nep141:eth".to_string(),
+                sleeve_id: "majors".to_string(),
                 qty: 1_000_000,
                 deposit_account: intents(),
                 min_usdc_out: 950_000,

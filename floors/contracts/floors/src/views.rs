@@ -42,6 +42,7 @@ pub struct PauseView {
 pub struct UnwindView {
     pub id: String,
     pub asset: String,
+    pub sleeve_id: String,
     pub qty: String,
     pub deposit_account: String,
     pub min_usdc_out: String,
@@ -212,6 +213,7 @@ impl Contract {
             .map(|(_id, u)| UnwindView {
                 id: u.id.to_string(),
                 asset: u.asset.clone(),
+                sleeve_id: u.sleeve_id.clone(),
                 qty: u.qty.to_string(),
                 deposit_account: u.deposit_account.to_string(),
                 min_usdc_out: u.min_usdc_out.to_string(),
