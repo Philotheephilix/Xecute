@@ -72,7 +72,7 @@ export default function Portfolio({ navigate, account, className }: Props) {
     if (actionLoading) return;
     setActionLoading(floorId + ':' + action);
     try {
-      await submitAction({ action, floor_id: floorId, account_id: accountId });
+      await submitAction({ action, floor_id: floorId });
       // Refresh positions after action
       const updated = await getPositions(accountId);
       setPositions(updated);
@@ -204,7 +204,7 @@ export default function Portfolio({ navigate, account, className }: Props) {
                       Protected until {formatDate(pos.protected_until)}
                     </p>
                   )}
-                  {pos.status !== 'closed' && (
+                  {pos.status === 'active' && (
                     <div className="flex gap-2 mt-3">
                       <button
                         onClick={() => handleAction('sell_to_floor', pos.floor_id)}

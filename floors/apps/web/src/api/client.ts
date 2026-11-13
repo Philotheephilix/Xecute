@@ -285,16 +285,16 @@ export async function getSuggestions(): Promise<{ floor_bps: number; duration_se
 /**
  * Submit an action (sell_to_floor, close) for a floor position.
  * TODO: add passkey signing
+ * TODO: add Authorization: Bearer <session_token> header — API returns 401 without it
  */
 export async function submitAction(params: {
   action: 'sell_to_floor' | 'close';
   floor_id: string;
-  account_id: string;
 }): Promise<{ ok: boolean }> {
   const res = await fetch(`${BASE_URL}/v1/actions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(params),
+    body: JSON.stringify({ floor_id: params.floor_id, action: params.action }),
   });
   if (!res.ok) {
     const json = await res.json().catch(() => ({})) as { error?: string };
