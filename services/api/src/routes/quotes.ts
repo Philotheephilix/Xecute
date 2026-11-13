@@ -162,9 +162,11 @@ export function registerQuoteRoutes(app: FastifyInstance): void {
       );
     }
 
-    // Amount in USDC micro-units (6 decimals)
-    const usdNum = parseFloat(usd);
-    const amountUsdc = (BigInt(Math.round(usdNum * 1_000_000))).toString();
+    // Amount in USDC micro-units (6 decimals) — bigint only, no floats
+    // usd is a whole-or-decimal string like "10" or "10.50"
+    const [wholePart = '0', fracPart = ''] = usd.split('.');
+    const fracPadded = fracPart.slice(0, 6).padEnd(6, '0');
+    const amountUsdc = (BigInt(wholePart) * 1_000_000n + BigInt(fracPadded)).toString();
     const cacheKey = `${asset}:${amountUsdc}`;
 
     // Check cache
@@ -202,7 +204,7 @@ export function registerQuoteRoutes(app: FastifyInstance): void {
     const fracStr = fracEth.toString().padStart(18, '0').slice(0, 6);
     const estAmount = `${wholeEth.toString()}.${fracStr}`;
 
-    const youPay = (usdNum).toFixed(2);
+    const youPay = usd;
 
     const result: CachedDraftQuote = {
       quote_id,
@@ -277,7 +279,7 @@ export function registerQuoteRoutes(app: FastifyInstance): void {
       v: 1,
       id: generateQuoteId(),
       owner: 'pending.floors.near',
-      asset: assetUpper,
+      asset: asset,
       qty,
       floor_bps,
       duration_secs,
