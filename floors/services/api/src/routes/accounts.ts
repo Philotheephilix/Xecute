@@ -3,11 +3,19 @@ import { z } from 'zod';
 import { FloorApiError } from '@floors/shared-server';
 import type postgres from 'postgres';
 import { deriveAddress } from '@floors/wallet/nep616';
+import { createHash } from 'node:crypto';
+
+const AccountIdParamSchema = z.object({
+  account_id: z.string().regex(/^0s[0-9a-f]{40}$/, 'account_id must match /^0s[0-9a-f]{40}$/'),
+});
 
 const CreateAccountBodySchema = z.object({
   // compressed P-256 public key as hex (66 hex chars = 33 bytes, SEC1 compressed)
   public_key_hex: z.string().regex(/^[0-9a-f]{66}$/, 'must be 66 hex chars (compressed SEC1 P-256)'),
   credential_id: z.string().min(1),
+  // Allow mixed-case input; handler normalises to upper before DB query.
+  // Alphabet: ABCDEFGHJKLMNPQRSTUVWXYZ23456789 (no I/O/0/1)
+  invite_code: z.string().regex(/^[A-HJ-NP-Z2-9]{8}$/i, 'invite_code must be 8 chars from the invite alphabet').optional(),
 });
 
 const IdempotencyKeyHeader = z.string().uuid();
@@ -30,7 +38,7 @@ function hexToBytes(hex: string): Uint8Array {
   return result;
 }
 
-export function registerAccountRoutes(app: FastifyInstance, db: postgres.Sql): void {
+export function registerAccountRoutes(app: FastifyInstance, db: postgres.Sql, relayerUrl: string): void {
   /**
    * POST /v1/accounts
    *
@@ -87,13 +95,43 @@ export function registerAccountRoutes(app: FastifyInstance, db: postgres.Sql): v
       );
     }
 
-    const { public_key_hex, credential_id } = bodyResult.data;
+    const { public_key_hex, credential_id, invite_code } = bodyResult.data;
+
+    // Invite-gate: if any invite codes exist in the table, invite mode is on and
+    // a valid, unused code is required to create an account.
+    const inviteCount = await db<Array<{ n: string }>>`
+      SELECT COUNT(*)::text AS n FROM api.invite_codes LIMIT 1
+    `;
+    const inviteModeOn = inviteCount[0] !== undefined && parseInt(inviteCount[0].n, 10) > 0;
+
+    if (inviteModeOn) {
+      if (invite_code === undefined || invite_code === '') {
+        throw new FloorApiError('INVALID_INVITE', 'An invite code is required', false, 400);
+      }
+    }
 
     // Derive NEP-616 deterministic account ID from the compressed P-256 public key
     const compressedKey = hexToBytes(public_key_hex);
     const account_id = deriveAddress(compressedKey);
 
     request.log.info({ account_id, public_key_hex: public_key_hex.slice(0, 16) + '...', event: 'account_address_derived' });
+
+    // Atomically claim the invite code (validate + mark used in one UPDATE).
+    // This eliminates the TOCTOU race that existed with the old SELECT-then-UPDATE pattern.
+    // Must happen before the account INSERT so that a duplicate-key conflict on the account
+    // doesn't leave the code burned without an account being created.
+    if (inviteModeOn && invite_code !== undefined) {
+      const upperCode = invite_code.toUpperCase();
+      const claimed = await db<Array<{ code: string }>>`
+        UPDATE api.invite_codes
+        SET used_at = NOW(), used_by = ${account_id}
+        WHERE code = ${upperCode} AND used_at IS NULL
+        RETURNING code
+      `;
+      if (claimed.length === 0) {
+        throw new FloorApiError('INVALID_INVITE', 'Invalid or already used invite code', false, 400);
+      }
+    }
 
     // Check if account already exists in DB
     const existing = await db<AccountRow[]>`
@@ -108,6 +146,24 @@ export function registerAccountRoutes(app: FastifyInstance, db: postgres.Sql): v
         ON CONFLICT (account_id) DO NOTHING
       `;
       created = true;
+
+      // Fire-and-forget: ask the relayer to create the account on-chain.
+      // The address is deterministic so the user can retry if this fails.
+      const relayerIdempotencyKey = crypto.randomUUID();
+      fetch(`${relayerUrl}/v1/relay/create-account`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          account_id,
+          public_key_hex,
+          idempotency_key: relayerIdempotencyKey,
+        }),
+      }).catch((err: unknown) => {
+        request.log.error(
+          { err, account_id, event: 'relayer_create_account_fire_failed' },
+          'Background relayer create-account call failed',
+        );
+      });
     }
 
     const response = { account_id, created };
@@ -144,6 +200,100 @@ export function registerAccountRoutes(app: FastifyInstance, db: postgres.Sql): v
         public_key: row.public_key,
         created_at: row.created_at.toISOString(),
       });
+    },
+  );
+
+  // POST /v1/accounts/:account_id/enable-trading-request
+  app.post<{ Params: AccountParams }>(
+    '/v1/accounts/:account_id/enable-trading-request',
+    async (request, reply) => {
+      // Validate account_id param
+      const paramResult = AccountIdParamSchema.safeParse(request.params);
+      if (!paramResult.success) {
+        throw new FloorApiError(
+          'VALIDATION_ERROR',
+          'Invalid account_id: must match /^0s[0-9a-f]{40}$/',
+          false,
+          400,
+          { issues: paramResult.error.issues },
+        );
+      }
+
+      const { account_id } = paramResult.data;
+
+      // Look up account to verify it exists
+      const rows = await db<AccountRow[]>`
+        SELECT account_id, public_key, credential_id, created_at
+        FROM api.accounts
+        WHERE account_id = ${account_id}
+      `;
+
+      if (rows.length === 0 || rows[0] === undefined) {
+        throw new FloorApiError('ACCOUNT_NOT_FOUND', `Account ${account_id} not found`, false, 404);
+      }
+
+      const account = rows[0];
+
+      // Build wallet_request for calling intents.near#add_public_key
+      const wallet_request = {
+        receiver_id: 'intents.near',
+        actions: [
+          {
+            type: 'FunctionCall',
+            method_name: 'add_public_key',
+            args: btoa(JSON.stringify({ public_key: account.public_key })),
+            gas: '30000000000000',
+            deposit: '0',
+          },
+        ],
+      };
+
+      // challenge = sha256(json(wallet_request)) as hex
+      const challenge = createHash('sha256')
+        .update(JSON.stringify(wallet_request))
+        .digest('hex');
+
+      return reply.status(200).send({ wallet_request, challenge });
+    },
+  );
+
+  // GET /v1/accounts/:account_id/deposit-addresses
+  app.get<{ Params: AccountParams }>(
+    '/v1/accounts/:account_id/deposit-addresses',
+    async (request, reply) => {
+      // Validate account_id param
+      const paramResult = AccountIdParamSchema.safeParse(request.params);
+      if (!paramResult.success) {
+        throw new FloorApiError(
+          'VALIDATION_ERROR',
+          'Invalid account_id: must match /^0s[0-9a-f]{40}$/',
+          false,
+          400,
+          { issues: paramResult.error.issues },
+        );
+      }
+
+      const { account_id } = paramResult.data;
+
+      // Verify account exists
+      const rows = await db<AccountRow[]>`
+        SELECT account_id FROM api.accounts WHERE account_id = ${account_id}
+      `;
+
+      if (rows.length === 0 || rows[0] === undefined) {
+        throw new FloorApiError('ACCOUNT_NOT_FOUND', `Account ${account_id} not found`, false, 404);
+      }
+
+      const note = 'Send USDC — 1Click routes to your NEAR account automatically';
+
+      const addresses = [
+        { chain: 'ethereum', chain_display: 'Ethereum', address: account_id, asset: 'USDC', min_amount: '1.00', note },
+        { chain: 'base',     chain_display: 'Base',     address: account_id, asset: 'USDC', min_amount: '1.00', note },
+        { chain: 'arbitrum', chain_display: 'Arbitrum', address: account_id, asset: 'USDC', min_amount: '1.00', note },
+        { chain: 'solana',   chain_display: 'Solana',   address: account_id, asset: 'USDC', min_amount: '1.00', note },
+      ];
+
+      return reply.status(200).send({ addresses });
     },
   );
 
