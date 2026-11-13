@@ -1011,6 +1011,7 @@ dependencies = [
 name = "floors"
 version = "0.1.0"
 dependencies = [
+ "floors-types",
  "near-sdk",
  "serde",
  "serde_json",

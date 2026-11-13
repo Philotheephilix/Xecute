@@ -18,6 +18,9 @@ near-sdk = { version = "5.11.0", features = ["non-contract-usage"] }
 serde = { version = "1.0.219", features = ["derive"] }
 serde_json = "1.0.140"
 
+[dependencies]
+floors-types = { path = "../floors-types" }
+
 [dev-dependencies]
 near-sdk = { version = "5.11.0", features = ["unit-testing"] }
 
