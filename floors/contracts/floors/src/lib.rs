@@ -412,6 +412,21 @@ mod tests {
     }
 
     #[test]
+    fn test_guardian_can_pause() {
+        let mut contract = test_contract();
+
+        // Guardian is accounts(1) per test_contract() setup
+        let ctx = VMContextBuilder::new()
+            .predecessor_account_id(guardian())
+            .build();
+        testing_env!(ctx);
+
+        // Guardian should be able to pause
+        contract.pause("open_floors".to_string());
+        assert!(contract.is_paused("open_floors"));
+    }
+
+    #[test]
     fn test_add_and_remove_admin() {
         let mut contract = test_contract();
         let ctx = VMContextBuilder::new()

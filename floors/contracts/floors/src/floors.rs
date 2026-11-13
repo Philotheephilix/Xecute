@@ -1,8 +1,8 @@
-use crate::receivers::{floor_div_u128, ceil_div_u128};
+use crate::receivers::floor_div_u128;
 use crate::state::{FloorStatus, Totals};
 use crate::{Contract, ContractExt};
 use near_sdk::json_types::U128;
-use near_sdk::{env, near, AccountId, Gas, NearToken, Promise, PromiseOrValue};
+use near_sdk::{env, near, AccountId, Gas, NearToken, Promise};
 
 // ---------------------------------------------------------------------------
 // Cross-contract: intents.near mt_transfer and USDC ft_transfer
@@ -93,7 +93,7 @@ impl Contract {
         let decimals_pow = 10u128.pow(u32::from(asset_config.decimals));
         let payout_usdc = floor_div_u128(floor.qty, floor.floor_price_e6, decimals_pow);
 
-        let asset = floor.asset.clone();
+        let _asset = floor.asset.clone();
         let sleeve_id = floor.sleeve.clone();
         let qty = floor.qty;
         let reserved_usdc = floor.reserved_usdc;
@@ -151,8 +151,8 @@ impl Contract {
         let asset_qty = asset_qty.0;
 
         let success = matches!(
-            env::promise_result(0),
-            near_sdk::PromiseResult::Successful(_)
+            env::promise_result_checked(0, usize::MAX),
+            Ok(_)
         );
 
         let floor = match self.floors.get(&floor_id) {
@@ -263,6 +263,12 @@ impl Contract {
         let sleeve_id = floor.sleeve.clone();
         let owner = floor.owner.clone();
 
+        // Transition to ClosePending before cross-contract transfer (reentrancy guard)
+        {
+            let floor_mut = self.floors.get_mut(&floor_id).unwrap();
+            floor_mut.status = FloorStatus::ClosePending;
+        }
+
         // Update state synchronously before the transfer
         self.finalize_close_state(floor_id, qty, reserved_usdc, &asset, &sleeve_id);
 
@@ -283,8 +289,8 @@ impl Contract {
     #[private]
     pub fn on_close_transfer(&mut self, floor_id: u64, qty_returned: U128) {
         let success = matches!(
-            env::promise_result(0),
-            near_sdk::PromiseResult::Successful(_)
+            env::promise_result_checked(0, usize::MAX),
+            Ok(_)
         );
         let qty_returned = qty_returned.0;
 
@@ -292,6 +298,11 @@ impl Contract {
             Some(f) => f.clone(),
             None => return,
         };
+
+        near_sdk::require!(
+            floor.status == FloorStatus::ClosePending,
+            "E_UNEXPECTED_STATUS: expected ClosePending"
+        );
 
         if success {
             let floor_mut = self.floors.get_mut(&floor_id).unwrap();
@@ -341,6 +352,12 @@ impl Contract {
         let sleeve_id = floor.sleeve.clone();
         let owner = floor.owner.clone();
 
+        // Transition to ExpirePending before cross-contract transfer (reentrancy guard)
+        {
+            let floor_mut = self.floors.get_mut(&floor_id).unwrap();
+            floor_mut.status = FloorStatus::ExpirePending;
+        }
+
         // Update state before the transfer
         self.finalize_expire_state(floor_id, qty, reserved_usdc, &asset, &sleeve_id);
 
@@ -361,8 +378,8 @@ impl Contract {
     #[private]
     pub fn on_expire_transfer(&mut self, floor_id: u64, qty_returned: U128) {
         let success = matches!(
-            env::promise_result(0),
-            near_sdk::PromiseResult::Successful(_)
+            env::promise_result_checked(0, usize::MAX),
+            Ok(_)
         );
         let qty_returned = qty_returned.0;
 
@@ -370,6 +387,11 @@ impl Contract {
             Some(f) => f.clone(),
             None => return,
         };
+
+        near_sdk::require!(
+            floor.status == FloorStatus::ExpirePending,
+            "E_UNEXPECTED_STATUS: expected ExpirePending"
+        );
 
         if success {
             let floor_mut = self.floors.get_mut(&floor_id).unwrap();
@@ -441,8 +463,8 @@ impl Contract {
     pub fn on_retry_payout(&mut self, floor_id: u64, payout_usdc: U128) {
         let payout_usdc = payout_usdc.0;
         let success = matches!(
-            env::promise_result(0),
-            near_sdk::PromiseResult::Successful(_)
+            env::promise_result_checked(0, usize::MAX),
+            Ok(_)
         );
 
         let floor = match self.floors.get(&floor_id) {
@@ -504,7 +526,7 @@ impl Contract {
 impl Contract {
     fn finalize_close_state(
         &mut self,
-        floor_id: u64,
+        _floor_id: u64,
         qty: u128,
         reserved_usdc: u128,
         asset: &str,

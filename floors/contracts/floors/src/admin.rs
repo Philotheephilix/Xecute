@@ -7,9 +7,9 @@ use crate::{Contract, ContractExt};
 use near_sdk::{env, near, AccountId};
 
 // ---------------------------------------------------------------------------
-// Time-lock constant: 48 hours in milliseconds
+// Time-lock constant: 48 hours in nanoseconds
 // ---------------------------------------------------------------------------
-const CHANGE_DELAY_MS: u64 = 48 * 3_600 * 1_000;
+const CHANGE_DELAY_NS: u64 = 48 * 3_600 * 1_000_000_000u64;
 
 // ---------------------------------------------------------------------------
 // Access-control helpers (pub(crate) so tests and other modules can use them)
@@ -32,6 +32,18 @@ impl Contract {
             is_owner || is_admin,
             "E_UNAUTHORIZED: caller is not an admin"
         );
+    }
+
+    /// Guardian, any admin, or owner may call. Used for pause().
+    pub(crate) fn assert_guardian_or_admin(&self) {
+        let caller = env::predecessor_account_id();
+        if caller == self.roles.owner
+            || self.roles.admins.contains(&caller)
+            || caller == self.roles.guardian
+        {
+            return;
+        }
+        env::panic_str("E_UNAUTHORIZED: caller is not guardian or admin");
     }
 
     /// Returns true when the given scope is currently paused.
@@ -87,12 +99,9 @@ impl Contract {
             "E_BAD_MSG: change_id already queued"
         );
 
-        let now_ms = env::block_timestamp_ms();
-        let apply_after_ms = now_ms + CHANGE_DELAY_MS;
-        // pending_changes stores timestamps in nanoseconds for on-chain
-        // consistency; convert from ms.
-        let queued_ns = env::block_timestamp();
-        let apply_after_ns = apply_after_ms * 1_000_000;
+        let now_ns = env::block_timestamp();
+        let apply_after_ns = now_ns.saturating_add(CHANGE_DELAY_NS);
+        let queued_ns = now_ns;
 
         let change = PendingChange {
             change_id: change_id.clone(),
@@ -113,21 +122,19 @@ impl Contract {
     /// Apply a queued change after its delay has elapsed.
     /// Permissionless — anyone can call once the delay is up.
     pub fn apply_change(&mut self, change_id: String) {
-        let now_ms = env::block_timestamp_ms();
+        let now_ns = env::block_timestamp();
 
         // Find the index of the pending change.
         let index = self
             .pending_changes
             .iter()
             .position(|c| c.change_id == change_id)
-            .unwrap_or_else(|| env::panic_str("E_FLOOR_NOT_FOUND: change_id not found"));
+            .unwrap_or_else(|| env::panic_str("E_NOT_FOUND: change_id not found"));
 
         let change = self.pending_changes.get(index as u32).unwrap().clone();
 
-        // Convert apply_after_ns back to ms for comparison.
-        let apply_after_ms = change.apply_after_ns / 1_000_000;
         near_sdk::require!(
-            now_ms >= apply_after_ms,
+            now_ns >= change.apply_after_ns,
             "E_TOO_EARLY: time-lock delay has not elapsed"
         );
 
@@ -149,10 +156,10 @@ impl Contract {
     // Pause / unpause (admin-only pause, owner-only unpause per spec §3)
     // -----------------------------------------------------------------------
 
-    /// Pause a specific operation scope. Admin or owner.
+    /// Pause a specific operation scope. Guardian, admin, or owner.
     /// `scope`: "open_floors" | "close_floors" | "sell_to_floor" | "unwind"
     pub fn pause(&mut self, scope: String) {
-        self.assert_admin();
+        self.assert_guardian_or_admin();
         let by = env::predecessor_account_id().to_string();
         match scope.as_str() {
             "open_floors" => self.pause.buy = true,

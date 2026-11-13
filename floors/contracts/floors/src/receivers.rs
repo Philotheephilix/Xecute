@@ -283,6 +283,16 @@ impl Contract {
             sleeve.reserved_usdc += floor_usdc;
         }
 
+        // Validate quote.pyth_feed matches the configured feed for this asset
+        let feed_bytes = match decode_hex32(&quote.pyth_feed) {
+            Some(b) => b,
+            None => return PromiseOrValue::Value(refusal),
+        };
+        near_sdk::require!(
+            feed_bytes == asset_config.pyth_price_id,
+            "E_INVALID_PYTH_FEED: quote pyth_feed does not match configured feed for asset"
+        );
+
         // Cross-contract call to Pyth
         let pyth = self.params.pyth.clone();
         let current_account = env::current_account_id();
@@ -350,13 +360,13 @@ impl Contract {
         };
 
         // Read Pyth result
-        let pyth_result: Option<PythPrice> = match env::promise_result(0) {
-            near_sdk::PromiseResult::Successful(bytes) => {
+        let pyth_result: Option<PythPrice> = match env::promise_result_checked(0, usize::MAX) {
+            Ok(bytes) => {
                 serde_json::from_slice::<Option<PythPrice>>(&bytes)
                     .ok()
                     .flatten()
             }
-            _ => None,
+            Err(_) => None,
         };
 
         let pyth_price = match pyth_result {
@@ -456,6 +466,9 @@ impl Contract {
         usdc_totals.held += expected_fee;
         // reserved was pre-incremented in sleeve; reflect in totals
         usdc_totals.reserved += floor_usdc;
+        // The sleeve's free_usdc was already decremented by floor_usdc in mt_on_transfer;
+        // mirror that decrement in the global free total before adding sleeve_fee back.
+        usdc_totals.free = usdc_totals.free.saturating_sub(floor_usdc);
         usdc_totals.platform += platform_fee;
         // sleeve_fee flows to free side via sleeve.free_usdc
         usdc_totals.free += sleeve_fee;

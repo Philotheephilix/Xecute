@@ -148,6 +148,8 @@ pub struct PauseFlags {
 pub enum FloorStatus {
     Active,
     PayoutPending,
+    ClosePending,   // tokens transfer in-flight
+    ExpirePending,  // expire transfer in-flight
     Closed,
     Sold,
     Expired,
