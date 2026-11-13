@@ -3,6 +3,11 @@ import { z } from 'zod';
 import { FloorApiError } from '@floors/shared-server';
 import type postgres from 'postgres';
 import { deriveAddress } from '@floors/wallet/nep616';
+import { createHash } from 'node:crypto';
+
+const AccountIdParamSchema = z.object({
+  account_id: z.string().regex(/^0s[0-9a-f]{40}$/, 'account_id must match /^0s[0-9a-f]{40}$/'),
+});
 
 const CreateAccountBodySchema = z.object({
   // compressed P-256 public key as hex (66 hex chars = 33 bytes, SEC1 compressed)
@@ -144,6 +149,100 @@ export function registerAccountRoutes(app: FastifyInstance, db: postgres.Sql): v
         public_key: row.public_key,
         created_at: row.created_at.toISOString(),
       });
+    },
+  );
+
+  // POST /v1/accounts/:account_id/enable-trading-request
+  app.post<{ Params: AccountParams }>(
+    '/v1/accounts/:account_id/enable-trading-request',
+    async (request, reply) => {
+      // Validate account_id param
+      const paramResult = AccountIdParamSchema.safeParse(request.params);
+      if (!paramResult.success) {
+        throw new FloorApiError(
+          'VALIDATION_ERROR',
+          'Invalid account_id: must match /^0s[0-9a-f]{40}$/',
+          false,
+          400,
+          { issues: paramResult.error.issues },
+        );
+      }
+
+      const { account_id } = paramResult.data;
+
+      // Look up account to verify it exists
+      const rows = await db<AccountRow[]>`
+        SELECT account_id, public_key, credential_id, created_at
+        FROM api.accounts
+        WHERE account_id = ${account_id}
+      `;
+
+      if (rows.length === 0 || rows[0] === undefined) {
+        throw new FloorApiError('ACCOUNT_NOT_FOUND', `Account ${account_id} not found`, false, 404);
+      }
+
+      const account = rows[0];
+
+      // Build wallet_request for calling intents.near#add_public_key
+      const wallet_request = {
+        receiver_id: 'intents.near',
+        actions: [
+          {
+            type: 'FunctionCall',
+            method_name: 'add_public_key',
+            args: btoa(JSON.stringify({ public_key: account.public_key })),
+            gas: '30000000000000',
+            deposit: '0',
+          },
+        ],
+      };
+
+      // challenge = sha256(json(wallet_request)) as hex
+      const challenge = createHash('sha256')
+        .update(JSON.stringify(wallet_request))
+        .digest('hex');
+
+      return reply.status(200).send({ wallet_request, challenge });
+    },
+  );
+
+  // GET /v1/accounts/:account_id/deposit-addresses
+  app.get<{ Params: AccountParams }>(
+    '/v1/accounts/:account_id/deposit-addresses',
+    async (request, reply) => {
+      // Validate account_id param
+      const paramResult = AccountIdParamSchema.safeParse(request.params);
+      if (!paramResult.success) {
+        throw new FloorApiError(
+          'VALIDATION_ERROR',
+          'Invalid account_id: must match /^0s[0-9a-f]{40}$/',
+          false,
+          400,
+          { issues: paramResult.error.issues },
+        );
+      }
+
+      const { account_id } = paramResult.data;
+
+      // Verify account exists
+      const rows = await db<AccountRow[]>`
+        SELECT account_id FROM api.accounts WHERE account_id = ${account_id}
+      `;
+
+      if (rows.length === 0 || rows[0] === undefined) {
+        throw new FloorApiError('ACCOUNT_NOT_FOUND', `Account ${account_id} not found`, false, 404);
+      }
+
+      const note = 'Send USDC — 1Click routes to your NEAR account automatically';
+
+      const addresses = [
+        { chain: 'ethereum', chain_display: 'Ethereum', address: account_id, asset: 'USDC', min_amount: '1.00', note },
+        { chain: 'base',     chain_display: 'Base',     address: account_id, asset: 'USDC', min_amount: '1.00', note },
+        { chain: 'arbitrum', chain_display: 'Arbitrum', address: account_id, asset: 'USDC', min_amount: '1.00', note },
+        { chain: 'solana',   chain_display: 'Solana',   address: account_id, asset: 'USDC', min_amount: '1.00', note },
+      ];
+
+      return reply.status(200).send({ addresses });
     },
   );
 
