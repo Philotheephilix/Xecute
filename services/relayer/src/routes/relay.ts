@@ -420,8 +420,8 @@ export function registerRelayRoutes(
           msg: wallet_request_signed.msg,
           proof: wallet_request_signed.proof,
         },
-        gas: BigInt(100_000_000_000_000), // 100 TGas
-        attachedDeposit: BigInt(1),        // 1 yoctoNEAR required
+        gas: BigInt(30_000_000_000_000), // 30 TGas
+        attachedDeposit: BigInt(0),
       });
 
       tx_hash = outcome.transaction_outcome.id;
@@ -433,11 +433,11 @@ export function registerRelayRoutes(
 
     logger.info({ tx_hash, account_id, event: 'trading_enabled' }, 'Trading enabled for account');
 
-    const responseBody = { account_id, status: 'trading_enabled' as const, tx_hash };
+    const responseBody = { tx_hash, status: 'success' as const };
 
     await db`
       INSERT INTO relayer.create_account_requests (idempotency_key, account_id, tx_hash, status, result)
-      VALUES (${idempotency_key}, ${account_id}, ${tx_hash}, 'trading_enabled', ${db.json(responseBody)})
+      VALUES (${idempotency_key}, ${account_id}, ${tx_hash}, 'success', ${db.json(responseBody)})
       ON CONFLICT (idempotency_key) DO NOTHING
     `;
 

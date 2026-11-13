@@ -35,7 +35,7 @@ function hexToBytes(hex: string): Uint8Array {
   return result;
 }
 
-export function registerAccountRoutes(app: FastifyInstance, db: postgres.Sql): void {
+export function registerAccountRoutes(app: FastifyInstance, db: postgres.Sql, relayerUrl: string): void {
   /**
    * POST /v1/accounts
    *
@@ -113,6 +113,24 @@ export function registerAccountRoutes(app: FastifyInstance, db: postgres.Sql): v
         ON CONFLICT (account_id) DO NOTHING
       `;
       created = true;
+
+      // Fire-and-forget: ask the relayer to create the account on-chain.
+      // The address is deterministic so the user can retry if this fails.
+      const relayerIdempotencyKey = crypto.randomUUID();
+      fetch(`${relayerUrl}/v1/relay/create-account`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          account_id,
+          public_key_hex,
+          idempotency_key: relayerIdempotencyKey,
+        }),
+      }).catch((err: unknown) => {
+        request.log.error(
+          { err, account_id, event: 'relayer_create_account_fire_failed' },
+          'Background relayer create-account call failed',
+        );
+      });
     }
 
     const response = { account_id, created };

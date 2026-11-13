@@ -15,7 +15,7 @@ export async function buildApp(
   const app = await createApp(config, logger);
 
   // Register all routes
-  registerAccountRoutes(app, db);
+  registerAccountRoutes(app, db, config.RELAYER_URL);
   registerQuoteRoutes(app);
   registerBuyRoutes(app, config.RELAYER_URL);
   registerSubmitRoutes(app, db, config.RELAYER_URL);
