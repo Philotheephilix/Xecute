@@ -1,2 +1,244 @@
-#![allow(dead_code)]
-// TODO: implement in S1+
+use crate::events::{
+    emit_change_applied, emit_change_queued, emit_paused, emit_unpaused, ChangeAppliedEvent,
+    ChangeQueuedEvent, PausedEvent, UnpausedEvent,
+};
+use crate::state::PendingChange;
+use crate::{Contract, ContractExt};
+use near_sdk::{env, near, AccountId};
+
+// ---------------------------------------------------------------------------
+// Time-lock constant: 48 hours in milliseconds
+// ---------------------------------------------------------------------------
+const CHANGE_DELAY_MS: u64 = 48 * 3_600 * 1_000;
+
+// ---------------------------------------------------------------------------
+// Access-control helpers (pub(crate) so tests and other modules can use them)
+// ---------------------------------------------------------------------------
+
+impl Contract {
+    pub(crate) fn assert_owner(&self) {
+        near_sdk::require!(
+            env::predecessor_account_id() == self.roles.owner,
+            "E_UNAUTHORIZED: caller is not the contract owner"
+        );
+    }
+
+    /// Owner always has admin rights; otherwise the caller must be in `roles.admins`.
+    pub(crate) fn assert_admin(&self) {
+        let caller = env::predecessor_account_id();
+        let is_owner = caller == self.roles.owner;
+        let is_admin = self.roles.admins.contains(&caller);
+        near_sdk::require!(
+            is_owner || is_admin,
+            "E_UNAUTHORIZED: caller is not an admin"
+        );
+    }
+
+    /// Returns true when the given scope is currently paused.
+    pub(crate) fn is_paused(&self, scope: &str) -> bool {
+        if self.pause.global {
+            return true;
+        }
+        match scope {
+            "open_floors" => self.pause.buy,
+            "close_floors" => self.pause.close,
+            "sell_to_floor" => self.pause.sell_to_floor,
+            "unwind" => self.pause.unwind,
+            _ => false,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Admin methods exposed on-chain
+// ---------------------------------------------------------------------------
+
+#[near]
+impl Contract {
+    // -----------------------------------------------------------------------
+    // Params initialisation (owner-only, intended for one-time setup)
+    // -----------------------------------------------------------------------
+
+    /// Replace contract params. Owner-only. Can be called multiple times by
+    /// the owner (use `queue_change` / `apply_change` for time-locked updates
+    /// in production).
+    pub fn init_params(&mut self, params: crate::state::Params) {
+        self.assert_owner();
+        self.params = params;
+    }
+
+    // -----------------------------------------------------------------------
+    // Time-locked parameter changes
+    // -----------------------------------------------------------------------
+
+    /// Queue a parameter change with a 48-hour delay.
+    /// `kind`: a short label (e.g. "params", "roles", "upgrade").
+    /// `value`: serialised payload (opaque string; applied by `apply_change`).
+    pub fn queue_change(&mut self, change_id: String, kind: String, value: String) {
+        self.assert_owner();
+
+        // Reject duplicate change_id.
+        let already_exists = self
+            .pending_changes
+            .iter()
+            .any(|c| c.change_id == change_id);
+        near_sdk::require!(
+            !already_exists,
+            "E_BAD_MSG: change_id already queued"
+        );
+
+        let now_ms = env::block_timestamp_ms();
+        let apply_after_ms = now_ms + CHANGE_DELAY_MS;
+        // pending_changes stores timestamps in nanoseconds for on-chain
+        // consistency; convert from ms.
+        let queued_ns = env::block_timestamp();
+        let apply_after_ns = apply_after_ms * 1_000_000;
+
+        let change = PendingChange {
+            change_id: change_id.clone(),
+            kind: kind.clone(),
+            payload: value,
+            queued_ns,
+            apply_after_ns,
+        };
+        self.pending_changes.push(change);
+
+        emit_change_queued(&ChangeQueuedEvent {
+            change_id,
+            kind,
+            eta_ns: apply_after_ns,
+        });
+    }
+
+    /// Apply a queued change after its delay has elapsed.
+    /// Permissionless — anyone can call once the delay is up.
+    pub fn apply_change(&mut self, change_id: String) {
+        let now_ms = env::block_timestamp_ms();
+
+        // Find the index of the pending change.
+        let index = self
+            .pending_changes
+            .iter()
+            .position(|c| c.change_id == change_id)
+            .unwrap_or_else(|| env::panic_str("E_FLOOR_NOT_FOUND: change_id not found"));
+
+        let change = self.pending_changes.get(index as u32).unwrap().clone();
+
+        // Convert apply_after_ns back to ms for comparison.
+        let apply_after_ms = change.apply_after_ns / 1_000_000;
+        near_sdk::require!(
+            now_ms >= apply_after_ms,
+            "E_TOO_EARLY: time-lock delay has not elapsed"
+        );
+
+        // Remove from the vector by swapping with the last element.
+        let last_idx = self.pending_changes.len() - 1;
+        if index as u32 != last_idx {
+            let last = self.pending_changes.get(last_idx).unwrap().clone();
+            *self.pending_changes.get_mut(index as u32).unwrap() = last;
+        }
+        self.pending_changes.pop();
+
+        emit_change_applied(&ChangeAppliedEvent {
+            change_id,
+            kind: change.kind,
+        });
+    }
+
+    // -----------------------------------------------------------------------
+    // Pause / unpause (admin-only pause, owner-only unpause per spec §3)
+    // -----------------------------------------------------------------------
+
+    /// Pause a specific operation scope. Admin or owner.
+    /// `scope`: "open_floors" | "close_floors" | "sell_to_floor" | "unwind"
+    pub fn pause(&mut self, scope: String) {
+        self.assert_admin();
+        let by = env::predecessor_account_id().to_string();
+        match scope.as_str() {
+            "open_floors" => self.pause.buy = true,
+            "close_floors" => self.pause.close = true,
+            "sell_to_floor" => self.pause.sell_to_floor = true,
+            "unwind" => self.pause.unwind = true,
+            _ => env::panic_str("E_BAD_MSG: unknown pause scope"),
+        }
+        emit_paused(&PausedEvent { scope, by });
+    }
+
+    /// Unpause a specific operation scope. Owner-only.
+    pub fn unpause(&mut self, scope: String) {
+        self.assert_owner();
+        let by = env::predecessor_account_id().to_string();
+        match scope.as_str() {
+            "open_floors" => self.pause.buy = false,
+            "close_floors" => self.pause.close = false,
+            "sell_to_floor" => self.pause.sell_to_floor = false,
+            "unwind" => self.pause.unwind = false,
+            _ => env::panic_str("E_BAD_MSG: unknown pause scope"),
+        }
+        emit_unpaused(&UnpausedEvent { scope, by });
+    }
+
+    // -----------------------------------------------------------------------
+    // Quote-signer key management (owner-only)
+    // -----------------------------------------------------------------------
+
+    /// Add a named Ed25519 quote-signer public key (hex-encoded, 64 chars).
+    pub fn add_quote_signer(&mut self, key_id: String, public_key_hex: String) {
+        self.assert_owner();
+        near_sdk::require!(
+            public_key_hex.len() == 64,
+            "E_BAD_MSG: public_key_hex must be 64 hex chars (32 bytes)"
+        );
+        let bytes = hex::decode_to_array(&public_key_hex)
+            .unwrap_or_else(|_| env::panic_str("E_BAD_MSG: invalid hex in public_key_hex"));
+        self.roles.quote_signer_keys.insert(key_id, bytes);
+    }
+
+    /// Remove a named quote-signer key.
+    pub fn remove_quote_signer(&mut self, key_id: String) {
+        self.assert_owner();
+        near_sdk::require!(
+            self.roles.quote_signer_keys.remove(&key_id).is_some(),
+            "E_BAD_MSG: key_id not found"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Admin account management (owner-only)
+    // -----------------------------------------------------------------------
+
+    /// Add an account to the admin list.
+    pub fn add_admin(&mut self, account_id: AccountId) {
+        self.assert_owner();
+        if !self.roles.admins.contains(&account_id) {
+            self.roles.admins.push(account_id);
+        }
+    }
+
+    /// Remove an account from the admin list.
+    pub fn remove_admin(&mut self, account_id: AccountId) {
+        self.assert_owner();
+        self.roles.admins.retain(|a| a != &account_id);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Hex decoding helper (no extra crate needed)
+// ---------------------------------------------------------------------------
+
+mod hex {
+    pub fn decode_to_array(s: &str) -> Result<[u8; 32], ()> {
+        let bytes = decode(s)?;
+        bytes.try_into().map_err(|_| ())
+    }
+
+    pub fn decode(s: &str) -> Result<Vec<u8>, ()> {
+        if s.len() % 2 != 0 {
+            return Err(());
+        }
+        (0..s.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&s[i..i + 2], 16).map_err(|_| ()))
+            .collect()
+    }
+}

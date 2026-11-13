@@ -306,4 +306,235 @@ mod tests {
         assert_eq!(view.id, "majors");
         assert_eq!(view.free_usdc, "0");
     }
+
+    // -------------------------------------------------------------------------
+    // Admin tests
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_admin_pause_unpause() {
+        let mut contract = test_contract();
+
+        // Initially not paused
+        assert!(!contract.is_paused("open_floors"));
+
+        // Pause as owner (owner is also admin)
+        let ctx = VMContextBuilder::new()
+            .predecessor_account_id(owner())
+            .build();
+        testing_env!(ctx);
+        contract.pause("open_floors".to_string());
+        assert!(contract.is_paused("open_floors"));
+
+        // Other scopes not affected
+        assert!(!contract.is_paused("sell_to_floor"));
+        assert!(!contract.is_paused("close_floors"));
+        assert!(!contract.is_paused("unwind"));
+
+        // Unpause
+        contract.unpause("open_floors".to_string());
+        assert!(!contract.is_paused("open_floors"));
+    }
+
+    #[test]
+    fn test_pause_all_scopes() {
+        let mut contract = test_contract();
+        let ctx = VMContextBuilder::new()
+            .predecessor_account_id(owner())
+            .build();
+        testing_env!(ctx);
+
+        for scope in &["open_floors", "close_floors", "sell_to_floor", "unwind"] {
+            assert!(!contract.is_paused(scope));
+            contract.pause(scope.to_string());
+            assert!(contract.is_paused(scope));
+            contract.unpause(scope.to_string());
+            assert!(!contract.is_paused(scope));
+        }
+    }
+
+    #[test]
+    fn test_queue_and_apply_change() {
+        let mut contract = test_contract();
+
+        // Queue as owner at time T=0
+        let ctx = VMContextBuilder::new()
+            .predecessor_account_id(owner())
+            .block_timestamp(0) // ns
+            .build();
+        testing_env!(ctx);
+        contract.queue_change(
+            "chg-001".to_string(),
+            "params".to_string(),
+            "{\"platform_fee_bps\":200}".to_string(),
+        );
+        assert_eq!(contract.pending_changes.len(), 1);
+
+        // Attempt apply too early (1 hour after queue = well before 48h delay)
+        let one_hour_ns: u64 = 3_600 * 1_000_000_000; // 1h in ns
+        let ctx_early = VMContextBuilder::new()
+            .predecessor_account_id(user())
+            .block_timestamp(one_hour_ns)
+            .build();
+        testing_env!(ctx_early);
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            contract.apply_change("chg-001".to_string());
+        }));
+        assert!(result.is_err(), "apply_change should panic before delay");
+        assert_eq!(
+            contract.pending_changes.len(),
+            1,
+            "change still pending after premature apply attempt"
+        );
+
+        // Advance time to 49 hours after queue → delay elapsed
+        let forty_nine_hours_ns: u64 = 49 * 3_600 * 1_000_000_000;
+        let ctx_late = VMContextBuilder::new()
+            .predecessor_account_id(user())
+            .block_timestamp(forty_nine_hours_ns)
+            .build();
+        testing_env!(ctx_late);
+        contract.apply_change("chg-001".to_string());
+        assert_eq!(contract.pending_changes.len(), 0);
+    }
+
+    #[test]
+    #[should_panic(expected = "E_UNAUTHORIZED")]
+    fn test_access_control_non_owner_cannot_pause() {
+        let mut contract = test_contract();
+
+        // Non-admin, non-owner tries to pause
+        let ctx = VMContextBuilder::new()
+            .predecessor_account_id(user()) // user is not owner or admin
+            .build();
+        testing_env!(ctx);
+        contract.pause("open_floors".to_string()); // should panic with E_UNAUTHORIZED
+    }
+
+    #[test]
+    fn test_add_and_remove_admin() {
+        let mut contract = test_contract();
+        let ctx = VMContextBuilder::new()
+            .predecessor_account_id(owner())
+            .build();
+        testing_env!(ctx);
+
+        let admin: AccountId = "alice.near".parse().unwrap();
+
+        // Add admin
+        contract.add_admin(admin.clone());
+        assert!(contract.roles.admins.contains(&admin));
+
+        // Admin can now pause (set context to admin)
+        let ctx_admin = VMContextBuilder::new()
+            .predecessor_account_id(admin.clone())
+            .build();
+        testing_env!(ctx_admin);
+        contract.pause("sell_to_floor".to_string());
+        assert!(contract.is_paused("sell_to_floor"));
+
+        // Remove admin
+        let ctx_owner = VMContextBuilder::new()
+            .predecessor_account_id(owner())
+            .build();
+        testing_env!(ctx_owner);
+        contract.remove_admin(admin.clone());
+        assert!(!contract.roles.admins.contains(&admin));
+    }
+
+    // -------------------------------------------------------------------------
+    // Quote signature test (byte-level TS compatibility)
+    // -------------------------------------------------------------------------
+
+    /// Test that `build_quote_message` produces the exact bytes that the
+    /// TypeScript signing.ts implementation would produce, and that an
+    /// Ed25519 signature over those bytes verifies correctly with ed25519-dalek.
+    ///
+    /// Since `env::ed25519_verify` is a NEAR host function unavailable in
+    /// unit tests, we verify the message bytes + signature using ed25519-dalek
+    /// directly.  The same byte layout is what `verify_quote_sig` passes to
+    /// the host function on-chain.
+    #[test]
+    fn test_verify_quote_sig_bytes() {
+        use ed25519_dalek::{Signer, SigningKey, VerifyingKey};
+        use crate::quotes::build_quote_message;
+
+        // --- Known test vector ---
+        // 32-byte seed → deterministic keypair
+        let seed: [u8; 32] = [
+            0x9d, 0x61, 0xb1, 0x9d, 0xef, 0xfd, 0x5a, 0x60,
+            0xba, 0x84, 0x4a, 0xf4, 0x92, 0xec, 0x2c, 0x44,
+            0xd5, 0x03, 0x48, 0x08, 0x05, 0x39, 0x99, 0xd8,
+            0x45, 0xa0, 0x72, 0x3b, 0x84, 0x5a, 0x0c, 0xd0,
+        ];
+
+        let signing_key = SigningKey::from_bytes(&seed);
+        let verifying_key: VerifyingKey = signing_key.verifying_key();
+
+        // Payload fields
+        let quote_id: [u8; 32] = [
+            0x9f, 0x3c, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05,
+            0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d,
+            0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15,
+            0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d,
+        ];
+        let owner = "0s4f9a2c.near";
+        let asset = "nep141:eth.omft.near";
+        let qty: u128 = 14_620_000_000_000_000;
+        let floor_price_e6: u128 = 3_070_890_000;
+        let fee_usdc: u128 = 494_000;
+        let sleeve = "majors";
+        let expires_at: u64 = 1_763_017_251; // Unix seconds
+
+        // Build message
+        let message = build_quote_message(
+            &quote_id, owner, asset, qty, floor_price_e6, fee_usdc, sleeve, expires_at,
+        );
+
+        // Verify layout:
+        // 15 (prefix) + 32 (id) + 4+len(owner) + 4+len(asset) + 16+16+16 + 4+len(sleeve) + 8
+        let expected_len = 15 + 32
+            + 4 + owner.len()
+            + 4 + asset.len()
+            + 16 + 16 + 16
+            + 4 + sleeve.len()
+            + 8;
+        assert_eq!(message.len(), expected_len, "message length mismatch");
+
+        // Prefix check
+        assert_eq!(&message[..15], b"FLOORS_QUOTE/V1");
+        // id check (offset 15)
+        assert_eq!(&message[15..47], &quote_id);
+
+        // Sign with ed25519-dalek
+        let signature = signing_key.sign(&message);
+        let sig_bytes: [u8; 64] = signature.to_bytes();
+
+        // Verify with ed25519-dalek (same as what the NEAR host function does)
+        let pubkey_bytes: [u8; 32] = verifying_key.to_bytes();
+        verifying_key
+            .verify_strict(&message, &signature)
+            .expect("signature must verify");
+
+        // Verify that a wrong pubkey rejects
+        let wrong_seed = [0xffu8; 32];
+        let wrong_key = SigningKey::from_bytes(&wrong_seed);
+        let wrong_verifying: VerifyingKey = wrong_key.verifying_key();
+        assert!(
+            wrong_verifying.verify_strict(&message, &signature).is_err(),
+            "wrong key must not verify"
+        );
+
+        // Verify that a tampered message rejects
+        let mut tampered = message.clone();
+        tampered[20] ^= 0x01; // flip a bit in the id
+        assert!(
+            verifying_key.verify_strict(&tampered, &signature).is_err(),
+            "tampered message must not verify"
+        );
+
+        // Confirm pubkey and sig bytes are the right size for the on-chain function
+        assert_eq!(pubkey_bytes.len(), 32);
+        assert_eq!(sig_bytes.len(), 64);
+    }
 }

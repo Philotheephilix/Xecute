@@ -106,9 +106,14 @@ impl Params {
 pub struct Roles {
     pub owner: AccountId,
     pub guardian: AccountId,
+    /// Legacy slot — kept for Borsh layout compatibility; use `quote_signer_keys` for keyed access.
     pub quote_signers: Vec<[u8; 32]>,
     pub auto_protect_bot: Option<AccountId>,
     pub unwind_bot: Option<AccountId>,
+    /// Named admin accounts (owner always has admin rights too).
+    pub admins: Vec<AccountId>,
+    /// Named quote-signer keys: key_id → 32-byte Ed25519 public key.
+    pub quote_signer_keys: HashMap<String, [u8; 32]>,
 }
 
 impl Roles {
@@ -119,6 +124,8 @@ impl Roles {
             quote_signers,
             auto_protect_bot: None,
             unwind_bot: None,
+            admins: Vec::new(),
+            quote_signer_keys: HashMap::new(),
         }
     }
 }
@@ -127,9 +134,13 @@ impl Roles {
 #[derive(Debug, Clone, Default)]
 pub struct PauseFlags {
     pub global: bool,
+    /// Pause opening new floors ("open_floors" scope).
     pub buy: bool,
     pub sell_to_floor: bool,
+    /// Pause closing floors ("close_floors" scope).
     pub close: bool,
+    /// Pause unwind operations ("unwind" scope).
+    pub unwind: bool,
 }
 
 #[near(serializers = [borsh, json])]
@@ -223,6 +234,8 @@ pub struct Unwind {
 #[near(serializers = [borsh, json])]
 #[derive(Debug, Clone)]
 pub struct PendingChange {
+    /// Caller-supplied unique identifier for this change.
+    pub change_id: String,
     pub kind: String,
     pub payload: String,
     pub queued_ns: u64,
