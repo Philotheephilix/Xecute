@@ -1,9 +1,33 @@
-use near_sdk::{near, AccountId};
+use near_sdk::store::IterableMap;
+use near_sdk::{near, AccountId, BorshStorageKey};
+use std::collections::HashMap;
+
+pub type AssetId = String;
+pub type SleeveId = String;
 
 #[near(serializers = [borsh, json])]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StateVersion {
     V1,
+}
+
+/// Per-asset configuration stored in Params.
+#[near(serializers = [borsh, json])]
+#[derive(Debug, Clone)]
+pub struct AssetConfig {
+    pub decimals: u8,
+    pub min_qty: u128,
+    pub max_qty: u128,
+    pub max_open_floors: u32,
+    pub pyth_price_id: [u8; 32],
+}
+
+/// Per-sleeve configuration stored in Params.
+#[near(serializers = [borsh, json])]
+#[derive(Debug, Clone)]
+pub struct SleeveConfig {
+    pub max_utilization_bps: u32,
+    pub per_asset_cap_bps: HashMap<AssetId, u32>,
 }
 
 #[near(serializers = [borsh, json])]
@@ -21,6 +45,10 @@ pub struct Params {
     pub auto_protect_window_secs: u32,
     pub payout_gas: u64,
     pub expire_batch_max: u16,
+    /// Per-asset configuration (decimals, qty limits, pyth feed id).
+    pub assets: HashMap<AssetId, AssetConfig>,
+    /// Per-sleeve configuration (utilization cap, per-asset share caps).
+    pub sleeves: HashMap<SleeveId, SleeveConfig>,
 }
 
 impl Params {
@@ -39,6 +67,8 @@ impl Params {
             auto_protect_window_secs: 900,
             payout_gas: 15_000_000_000_000,
             expire_batch_max: 50,
+            assets: HashMap::new(),
+            sleeves: HashMap::new(),
         }
     }
 }
@@ -113,12 +143,44 @@ pub struct Totals {
     pub pending: u128,
 }
 
-#[near(serializers = [borsh, json])]
-#[derive(Debug, Clone)]
+/// BorshStorageKey for nested collections inside a Sleeve.
+/// The sleeve_id is embedded so every sleeve gets a unique prefix.
+#[derive(BorshStorageKey)]
+#[near]
+pub enum SleeveStorageKey {
+    Delivered { sleeve_id: Vec<u8> },
+}
+
+/// Sleeve is stored in a LookupMap and contains on-chain collections,
+/// so it uses Borsh only (IterableMap does not implement serde traits).
+#[near(serializers = [borsh])]
+#[derive(Debug)]
 pub struct Sleeve {
     pub id: String,
     pub free_usdc: u128,
     pub reserved_usdc: u128,
+    /// Tokens delivered to this sleeve in payout, keyed by asset id, not yet unwound.
+    pub delivered: IterableMap<AssetId, u128>,
+    /// Total LP shares outstanding for this sleeve (P3 outside depositors).
+    pub shares_total: u128,
+    /// Current reconciliation epoch (P3).
+    pub epoch: u64,
+}
+
+impl Sleeve {
+    pub fn new(id: String) -> Self {
+        let prefix = SleeveStorageKey::Delivered {
+            sleeve_id: id.as_bytes().to_vec(),
+        };
+        Self {
+            id: id.clone(),
+            free_usdc: 0,
+            reserved_usdc: 0,
+            delivered: IterableMap::new(prefix),
+            shares_total: 0,
+            epoch: 0,
+        }
+    }
 }
 
 #[near(serializers = [borsh, json])]
