@@ -35,9 +35,9 @@ export default function EnableTrading({ navigate, account, className }: Props) {
       const requestResult = await getEnableTradingRequest(accountId);
 
       if (requestResult === null) {
-        // Endpoint not implemented yet — skip directly to Fund
+        // Endpoint not implemented yet — skip to SetupDefaults
         console.warn('[floors] enable-trading-request not available, skipping step');
-        navigate('fund');
+        navigate('setup-defaults');
         return;
       }
 
@@ -71,7 +71,7 @@ export default function EnableTrading({ navigate, account, className }: Props) {
 
       // Brief pause so user can see the success state, then navigate
       await new Promise<void>((r) => setTimeout(r, 600));
-      navigate('fund');
+      navigate('setup-defaults');
     } catch (err) {
       console.error('[floors] enable-trading error:', err);
       setError(err instanceof Error ? err.message : 'Enable trading failed');
@@ -80,7 +80,7 @@ export default function EnableTrading({ navigate, account, className }: Props) {
   };
 
   const handleSkip = () => {
-    navigate('fund');
+    navigate('setup-defaults');
   };
 
   const isLoading = phase === 'requesting' || phase === 'signing' || phase === 'submitting';

@@ -64,10 +64,16 @@ impl Contract {
     ) -> Self {
         near_sdk::require!(!near_sdk::env::state_exists(), "Already initialized");
         near_sdk::require!(quote_signers.len() <= 2, "Max 2 quote signers");
+        // H6 fix: populate quote_signer_keys from initial vec so the verifier
+        // (which reads quote_signer_keys) can use them immediately.
+        let mut roles = state::Roles::new(owner, guardian, quote_signers.clone());
+        for (i, key) in quote_signers.iter().enumerate() {
+            roles.quote_signer_keys.insert(i.to_string(), *key);
+        }
         Self {
             version: state::StateVersion::V1,
             params: state::Params::new(intents, pyth, platform_account),
-            roles: state::Roles::new(owner, guardian, quote_signers),
+            roles,
             pause: state::PauseFlags::default(),
             floors: IterableMap::new(StorageKey::Floors),
             next_floor_id: 0,
@@ -110,10 +116,16 @@ mod tests {
             .predecessor_account_id(owner())
             .build();
         testing_env!(context);
+        let initial_signers = vec![[0u8; 32]];
+        let mut roles = Roles::new(owner(), guardian(), initial_signers.clone());
+        // Mirror new() behaviour: populate quote_signer_keys from initial vec
+        for (i, key) in initial_signers.iter().enumerate() {
+            roles.quote_signer_keys.insert(i.to_string(), *key);
+        }
         Contract {
             version: StateVersion::V1,
             params: Params::new(intents(), pyth(), platform()),
-            roles: Roles::new(owner(), guardian(), vec![[0u8; 32]]),
+            roles,
             pause: PauseFlags::default(),
             floors: near_sdk::store::IterableMap::new(StorageKey::Floors),
             next_floor_id: 0,
@@ -133,31 +145,16 @@ mod tests {
 
     #[test]
     fn test_ceil_div() {
-        // 100 * 3070890000 / 10^18 = 307.089 USDC → ceiling = 308 (in smallest units)
-        // But let's use simpler numbers: qty=1, price=2000_000_000 (2000 USDC), dec=18
-        // result = ceil(1 * 2000_000_000 / 10^18) = ceil(2e-9) = 1
         assert_eq!(ceil_div_u128(1, 2_000_000_000, 10u128.pow(18)), 1);
-
-        // qty = 10^18 (1 whole token), price = 3070890000 (3070.89 USDC), dec=18
-        // result = ceil(10^18 * 3070890000 / 10^18) = ceil(3070890000) = 3070890000
         assert_eq!(ceil_div_u128(10u128.pow(18), 3_070_890_000, 10u128.pow(18)), 3_070_890_000);
-
-        // Rounding up: qty=3, price=10, divisor=4 → ceil(30/4) = ceil(7.5) = 8
         assert_eq!(ceil_div_u128(3, 10, 4), 8);
-
-        // Exact: qty=4, price=10, divisor=4 → ceil(40/4) = 10
         assert_eq!(ceil_div_u128(4, 10, 4), 10);
     }
 
     #[test]
     fn test_floor_div() {
-        // floor(3 * 10 / 4) = floor(7.5) = 7
         assert_eq!(floor_div_u128(3, 10, 4), 7);
-
-        // floor(4 * 10 / 4) = 10
         assert_eq!(floor_div_u128(4, 10, 4), 10);
-
-        // 1 ETH at $3070.89 → floor(10^18 * 3070890000 / 10^18) = 3070890000
         assert_eq!(floor_div_u128(10u128.pow(18), 3_070_890_000, 10u128.pow(18)), 3_070_890_000);
     }
 
@@ -246,13 +243,11 @@ mod tests {
 
     #[test]
     fn test_totals_assert_solvent_passes() {
-        // A balanced totals struct should pass assert_solvent
         let mut t = Totals::default();
         t.held = 100;
         t.escrow = 60;
         t.delivered = 30;
         t.credits = 10;
-        // 60 + 30 + 10 = 100 = held → solvent
         t.assert_solvent("test_asset");
     }
 
@@ -273,7 +268,6 @@ mod tests {
         t.free = 300;
         t.platform = 100;
         t.credits = 100;
-        // 500 + 300 + 100 + 100 = 1000 = held
         t.assert_usdc_solvent();
     }
 
@@ -315,10 +309,8 @@ mod tests {
     fn test_admin_pause_unpause() {
         let mut contract = test_contract();
 
-        // Initially not paused
         assert!(!contract.is_paused("open_floors"));
 
-        // Pause as owner (owner is also admin)
         let ctx = VMContextBuilder::new()
             .predecessor_account_id(owner())
             .build();
@@ -326,12 +318,10 @@ mod tests {
         contract.pause("open_floors".to_string());
         assert!(contract.is_paused("open_floors"));
 
-        // Other scopes not affected
         assert!(!contract.is_paused("sell_to_floor"));
         assert!(!contract.is_paused("close_floors"));
         assert!(!contract.is_paused("unwind"));
 
-        // Unpause
         contract.unpause("open_floors".to_string());
         assert!(!contract.is_paused("open_floors"));
     }
@@ -396,6 +386,8 @@ mod tests {
         testing_env!(ctx_late);
         contract.apply_change("chg-001".to_string());
         assert_eq!(contract.pending_changes.len(), 0);
+        // Verify the param was actually updated
+        assert_eq!(contract.params.platform_fee_bps, 200);
     }
 
     #[test]
@@ -403,7 +395,6 @@ mod tests {
     fn test_access_control_non_owner_cannot_pause() {
         let mut contract = test_contract();
 
-        // Non-admin, non-owner tries to pause
         let ctx = VMContextBuilder::new()
             .predecessor_account_id(user()) // user is not owner or admin
             .build();
@@ -415,13 +406,11 @@ mod tests {
     fn test_guardian_can_pause() {
         let mut contract = test_contract();
 
-        // Guardian is accounts(1) per test_contract() setup
         let ctx = VMContextBuilder::new()
             .predecessor_account_id(guardian())
             .build();
         testing_env!(ctx);
 
-        // Guardian should be able to pause
         contract.pause("open_floors".to_string());
         assert!(contract.is_paused("open_floors"));
     }
@@ -436,11 +425,9 @@ mod tests {
 
         let admin: AccountId = "alice.near".parse().unwrap();
 
-        // Add admin
         contract.add_admin(admin.clone());
         assert!(contract.roles.admins.contains(&admin));
 
-        // Admin can now pause (set context to admin)
         let ctx_admin = VMContextBuilder::new()
             .predecessor_account_id(admin.clone())
             .build();
@@ -448,7 +435,6 @@ mod tests {
         contract.pause("sell_to_floor".to_string());
         assert!(contract.is_paused("sell_to_floor"));
 
-        // Remove admin
         let ctx_owner = VMContextBuilder::new()
             .predecessor_account_id(owner())
             .build();
@@ -464,18 +450,12 @@ mod tests {
     /// Test that `build_quote_message` produces the exact bytes that the
     /// TypeScript signing.ts implementation would produce, and that an
     /// Ed25519 signature over those bytes verifies correctly with ed25519-dalek.
-    ///
-    /// Since `env::ed25519_verify` is a NEAR host function unavailable in
-    /// unit tests, we verify the message bytes + signature using ed25519-dalek
-    /// directly.  The same byte layout is what `verify_quote_sig` passes to
-    /// the host function on-chain.
     #[test]
     fn test_verify_quote_sig_bytes() {
         use ed25519_dalek::{Signer, SigningKey, VerifyingKey};
         use crate::quotes::build_quote_message;
 
         // --- Known test vector ---
-        // 32-byte seed → deterministic keypair
         let seed: [u8; 32] = [
             0x9d, 0x61, 0xb1, 0x9d, 0xef, 0xfd, 0x5a, 0x60,
             0xba, 0x84, 0x4a, 0xf4, 0x92, 0xec, 0x2c, 0x44,
@@ -507,7 +487,6 @@ mod tests {
         );
 
         // Verify layout:
-        // 15 (prefix) + 32 (id) + 4+len(owner) + 4+len(asset) + 16+16+16 + 4+len(sleeve) + 8
         let expected_len = 15 + 32
             + 4 + owner.len()
             + 4 + asset.len()
@@ -525,7 +504,7 @@ mod tests {
         let signature = signing_key.sign(&message);
         let sig_bytes: [u8; 64] = signature.to_bytes();
 
-        // Verify with ed25519-dalek (same as what the NEAR host function does)
+        // Verify with ed25519-dalek
         let pubkey_bytes: [u8; 32] = verifying_key.to_bytes();
         verifying_key
             .verify_strict(&message, &signature)
@@ -542,13 +521,13 @@ mod tests {
 
         // Verify that a tampered message rejects
         let mut tampered = message.clone();
-        tampered[20] ^= 0x01; // flip a bit in the id
+        tampered[20] ^= 0x01;
         assert!(
             verifying_key.verify_strict(&tampered, &signature).is_err(),
             "tampered message must not verify"
         );
 
-        // Confirm pubkey and sig bytes are the right size for the on-chain function
+        // Confirm sizes
         assert_eq!(pubkey_bytes.len(), 32);
         assert_eq!(sig_bytes.len(), 64);
     }

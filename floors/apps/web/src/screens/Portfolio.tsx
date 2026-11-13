@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import type { Screen, AccountState } from '../App';
 import type { Position } from '../api/client';
-import { getPositions, submitAction } from '../api/client';
+import { getPositions, getActionChallenge, submitAction } from '../api/client';
+import { signWithPasskey, toHex } from '../lib/passkey';
 
 interface Props {
   navigate: (to: Screen) => void;
@@ -43,6 +44,7 @@ function BadgeStatus({ status }: { status: Position['status'] }) {
 export default function Portfolio({ navigate, account, className }: Props) {
   const accountId = account?.accountId ?? '0sabc123def456';
   const [positions, setPositions] = useState<Position[]>([]);
+  // H1: near_balance from API response (not hardcoded)
   const [balance, setBalance] = useState<string | null>(null);
   const [loadingPositions, setLoadingPositions] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
@@ -51,12 +53,11 @@ export default function Portfolio({ navigate, account, className }: Props) {
     let cancelled = false;
     setLoadingPositions(true);
     getPositions(accountId)
-      .then((pos) => {
+      .then(({ positions: pos, near_balance }) => {
         if (!cancelled) {
           setPositions(pos);
-          // Use near_balance from positions if available — getPositions currently returns Position[]
-          // so balance comes separately; default to showing account id for now
-          setBalance(pos.length > 0 ? 'Loading…' : null);
+          // H1: use near_balance from API response
+          setBalance(near_balance);
         }
       })
       .catch(() => {
@@ -68,14 +69,43 @@ export default function Portfolio({ navigate, account, className }: Props) {
     return () => { cancelled = true; };
   }, [accountId]);
 
+  // C1: Two-step signed action — get challenge, sign with passkey, submit
   const handleAction = async (action: 'sell_to_floor' | 'close', floorId: string) => {
     if (actionLoading) return;
+    if (!account) return;
     setActionLoading(floorId + ':' + action);
     try {
-      await submitAction({ action, floor_id: floorId });
+      // Step 1: get challenge from API
+      const { wallet_request, challenge } = await getActionChallenge(accountId, action, floorId);
+
+      // Step 2: sign challenge with passkey
+      function hexToBytes(hex: string): Uint8Array {
+        const bytes = new Uint8Array(hex.length / 2);
+        for (let i = 0; i < bytes.length; i++) {
+          bytes[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+        }
+        return bytes;
+      }
+      const challengeBytes = hexToBytes(challenge);
+      const assertion = await signWithPasskey(challengeBytes, account.credentialId);
+      const signatureHex = toHex(assertion.signature);
+
+      // Step 3: submit with assertion
+      await submitAction({
+        action,
+        floor_id: floorId,
+        account_id: accountId,
+        assertion: {
+          signature: signatureHex,
+          credential_id: account.credentialId,
+          wallet_request,
+        },
+      });
+
       // Refresh positions after action
-      const updated = await getPositions(accountId);
+      const { positions: updated, near_balance } = await getPositions(accountId);
       setPositions(updated);
+      setBalance(near_balance);
     } catch (err) {
       console.error('[floors] action failed:', err);
     } finally {
@@ -128,7 +158,7 @@ export default function Portfolio({ navigate, account, className }: Props) {
       </div>
 
       <div className="flex flex-col px-6 py-6 gap-5">
-        {/* Balance card */}
+        {/* Balance card — H1: shows real near_balance from API */}
         <div className="bg-white border-2 border-[#111] rounded-[18px] shadow-neo p-5">
           <p className="text-xs font-extrabold text-gray-500 mb-1">TOTAL BALANCE</p>
           <p className="text-4xl font-extrabold text-[#111]">

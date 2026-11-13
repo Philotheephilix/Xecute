@@ -2,7 +2,7 @@ use crate::events::{
     emit_change_applied, emit_change_queued, emit_paused, emit_unpaused, ChangeAppliedEvent,
     ChangeQueuedEvent, PausedEvent, UnpausedEvent,
 };
-use crate::state::PendingChange;
+use crate::state::{Params, PendingChange};
 use crate::{Contract, ContractExt};
 use near_sdk::{env, near, AccountId};
 
@@ -146,6 +146,16 @@ impl Contract {
         }
         self.pending_changes.pop();
 
+        // M4 fix: Apply the change payload based on kind.
+        match change.kind.as_str() {
+            "params" => {
+                apply_params_patch(&mut self.params, &change.payload);
+            }
+            other => {
+                env::panic_str(&format!("E_BAD_MSG: unknown change kind '{other}'"));
+            }
+        }
+
         emit_change_applied(&ChangeAppliedEvent {
             change_id,
             kind: change.kind,
@@ -190,6 +200,7 @@ impl Contract {
     // -----------------------------------------------------------------------
 
     /// Add a named Ed25519 quote-signer public key (hex-encoded, 64 chars).
+    /// H6 fix: writes to quote_signer_keys (HashMap) which the verifier now reads.
     pub fn add_quote_signer(&mut self, key_id: String, public_key_hex: String) {
         self.assert_owner();
         near_sdk::require!(
@@ -226,6 +237,104 @@ impl Contract {
     pub fn remove_admin(&mut self, account_id: AccountId) {
         self.assert_owner();
         self.roles.admins.retain(|a| a != &account_id);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Params patch application
+// ---------------------------------------------------------------------------
+
+/// Apply a JSON patch to Params in-place.
+/// Only scalar top-level fields are supported. Patch fields that are present
+/// override the corresponding Params field. Unknown fields are ignored.
+/// This avoids round-tripping through serde_json::Value which can corrupt
+/// large u128 values (e.g. u128::MAX).
+fn apply_params_patch(params: &mut Params, patch_json: &str) {
+    use near_sdk::AccountId;
+
+    let patch: serde_json::Value = serde_json::from_str(patch_json)
+        .unwrap_or_else(|e| near_sdk::env::panic_str(&format!("E_BAD_PAYLOAD: invalid JSON: {e}")));
+
+    let obj = match &patch {
+        serde_json::Value::Object(m) => m,
+        _ => near_sdk::env::panic_str("E_BAD_PAYLOAD: patch must be a JSON object"),
+    };
+
+    for (key, val) in obj {
+        match key.as_str() {
+            "platform_fee_bps" => {
+                if let Some(n) = val.as_u64() {
+                    params.platform_fee_bps = n as u16;
+                }
+            }
+            "pyth_max_age_secs" => {
+                if let Some(n) = val.as_u64() {
+                    params.pyth_max_age_secs = n as u32;
+                }
+            }
+            "pyth_tolerance_bps" => {
+                if let Some(n) = val.as_u64() {
+                    params.pyth_tolerance_bps = n as u16;
+                }
+            }
+            "quote_ttl_max_secs" => {
+                if let Some(n) = val.as_u64() {
+                    params.quote_ttl_max_secs = n as u32;
+                }
+            }
+            "min_floor_usdc" => {
+                if let Some(n) = val.as_u64() {
+                    params.min_floor_usdc = n as u128;
+                } else if let Some(s) = val.as_str() {
+                    if let Ok(n) = s.parse::<u128>() {
+                        params.min_floor_usdc = n;
+                    }
+                }
+            }
+            "auto_protect_window_secs" => {
+                if let Some(n) = val.as_u64() {
+                    params.auto_protect_window_secs = n as u32;
+                }
+            }
+            "payout_gas" => {
+                if let Some(n) = val.as_u64() {
+                    params.payout_gas = n;
+                }
+            }
+            "expire_batch_max" => {
+                if let Some(n) = val.as_u64() {
+                    params.expire_batch_max = n as u16;
+                }
+            }
+            "intents" => {
+                if let Some(s) = val.as_str() {
+                    if let Ok(a) = s.parse::<AccountId>() {
+                        params.intents = a;
+                    }
+                }
+            }
+            "pyth" => {
+                if let Some(s) = val.as_str() {
+                    if let Ok(a) = s.parse::<AccountId>() {
+                        params.pyth = a;
+                    }
+                }
+            }
+            "usdc" => {
+                if let Some(s) = val.as_str() {
+                    params.usdc = s.to_string();
+                }
+            }
+            "platform_account" => {
+                if let Some(s) = val.as_str() {
+                    if let Ok(a) = s.parse::<AccountId>() {
+                        params.platform_account = a;
+                    }
+                }
+            }
+            // Unknown fields are silently ignored (forward compatibility)
+            _ => {}
+        }
     }
 }
 

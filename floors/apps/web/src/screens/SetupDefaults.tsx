@@ -65,7 +65,7 @@ export default function SetupDefaults({ navigate, className }: Props) {
       {/* Header row */}
       <div className="px-[18px] pt-14 flex items-center gap-3">
         <button
-          onClick={() => navigate('account-ready')}
+          onClick={() => navigate('enable-trading')}
           className="w-11 h-11 bg-white border-2 border-[#111] rounded-[13px] shadow-neo-sm shadow-neo-active flex items-center justify-center shrink-0"
           aria-label="Go back"
         >

@@ -57,7 +57,6 @@ const GAS_FOR_CALLBACK: Gas = Gas::from_tgas(40);
 // ---------------------------------------------------------------------------
 
 /// ceil(a * b / divisor) — safe for token_qty * floor_price_e6 / 10^decimals
-/// Works by splitting a = (a/divisor)*divisor + rem to avoid overflow.
 pub fn ceil_div_u128(a: u128, b: u128, divisor: u128) -> u128 {
     let quot = a / divisor;
     let rem = a % divisor;
@@ -107,27 +106,46 @@ fn decode_base64_64(b64: &str) -> Option<[u8; 64]> {
 }
 
 /// Encode the quote for signature verification.
-/// Message = b"FLOORS_QUOTE/V1" || borsh(fields in order)
+/// H5 fix: single canonical format — delegates to build_quote_message in quotes.rs.
+///
+/// Format (matches TypeScript signing.ts and build_quote_message):
+///   b"FLOORS_QUOTE/V1"  (15 bytes)
+///   id                  (32 bytes raw — decoded from hex)
+///   owner               (4-byte LE u32 length + UTF-8)
+///   asset               (4-byte LE u32 length + UTF-8)
+///   qty                 (16 bytes LE u128)
+///   floor_price_e6      (16 bytes LE u128)
+///   fee_usdc            (16 bytes LE u128)
+///   sleeve              (4-byte LE u32 length + UTF-8)
+///   expires_at          (8 bytes LE u64 — Unix seconds, not nanoseconds)
 fn quote_signing_message(q: &floors_types::FloorQuote) -> Vec<u8> {
-    let mut msg: Vec<u8> = b"FLOORS_QUOTE/V1".to_vec();
-    // Use borsh 1.x API: borsh::to_vec
-    fn append<T: near_sdk::borsh::BorshSerialize>(msg: &mut Vec<u8>, v: &T) {
-        msg.extend(near_sdk::borsh::to_vec(v).expect("borsh encode"));
-    }
-    append(&mut msg, &q.v);
-    append(&mut msg, &q.id);
-    append(&mut msg, &q.owner);
-    append(&mut msg, &q.asset);
-    append(&mut msg, &q.qty);
-    append(&mut msg, &q.floor_bps);
-    append(&mut msg, &q.duration_secs);
-    append(&mut msg, &q.floor_price_e6);
-    append(&mut msg, &q.fee_usdc);
-    append(&mut msg, &q.sleeve);
-    append(&mut msg, &q.pyth_feed);
-    append(&mut msg, &q.expires_at_ns);
-    append(&mut msg, &q.key_id);
-    msg
+    // Decode hex id
+    let id_bytes: [u8; 32] = {
+        let mut out = [0u8; 32];
+        if q.id.len() == 64 {
+            for i in 0..32 {
+                out[i] = u8::from_str_radix(&q.id[i * 2..i * 2 + 2], 16).unwrap_or(0);
+            }
+        }
+        out
+    };
+    let qty: u128 = q.qty.parse().unwrap_or(0);
+    let floor_price_e6: u128 = q.floor_price_e6.parse().unwrap_or(0);
+    let fee_usdc: u128 = q.fee_usdc.parse().unwrap_or(0);
+    // expires_at_ns is nanoseconds; signing format uses seconds
+    let expires_at_ns: u64 = q.expires_at_ns.parse().unwrap_or(0);
+    let expires_at_secs: u64 = expires_at_ns / 1_000_000_000;
+
+    crate::quotes::build_quote_message(
+        &id_bytes,
+        &q.owner,
+        &q.asset,
+        qty,
+        floor_price_e6,
+        fee_usdc,
+        &q.sleeve,
+        expires_at_secs,
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -138,7 +156,6 @@ fn quote_signing_message(q: &floors_types::FloorQuote) -> Vec<u8> {
 impl Contract {
     /// Entry point for opening a floor.
     /// Called by intents.near via NEP-245 after a transfer with message.
-    /// Returns refusal amounts (return tokens) or kicks off a Pyth cross-contract call.
     pub fn mt_on_transfer(
         &mut self,
         sender_id: AccountId,
@@ -233,15 +250,15 @@ impl Contract {
             return PromiseOrValue::Value(refusal);
         }
 
-        // Verify signature
+        // H6 fix: Verify signature — look up key by key_id in quote_signer_keys (HashMap).
+        // add_quote_signer also writes to quote_signer_keys, so rotation works.
         let Some(sig_bytes) = decode_base64_64(&parsed.sig) else {
             return PromiseOrValue::Value(refusal);
         };
-        let key_id = quote.key_id as usize;
-        if key_id >= self.roles.quote_signers.len() {
+        let key_id_str = quote.key_id.to_string();
+        let Some(&pub_key) = self.roles.quote_signer_keys.get(&key_id_str) else {
             return PromiseOrValue::Value(refusal);
-        }
-        let pub_key = self.roles.quote_signers[key_id];
+        };
         let signing_msg = quote_signing_message(&quote);
         if !env::ed25519_verify(&sig_bytes, &signing_msg, &pub_key) {
             return PromiseOrValue::Value(refusal);
@@ -333,11 +350,19 @@ impl Contract {
         let refusal: Vec<U128> = amounts.clone();
         let floor_usdc = floor_usdc.0;
 
+        // C3 fix: Extract sleeve_id before full deserialization so rollback works even
+        // if full quote deserialization fails.
+        #[derive(serde::Deserialize)]
+        struct QuoteSleeveOnly { sleeve: String }
+        let sleeve_id_for_rollback: String = serde_json::from_str::<QuoteSleeveOnly>(&quote_json)
+            .map(|q| q.sleeve)
+            .unwrap_or_default();
+
         // Deserialize quote
         let quote: floors_types::FloorQuote = match serde_json::from_str(&quote_json) {
             Ok(q) => q,
             Err(_) => {
-                self.rollback_sleeve_hold("", floor_usdc);
+                self.rollback_sleeve_hold(&sleeve_id_for_rollback, floor_usdc);
                 return refusal;
             }
         };
@@ -464,13 +489,9 @@ impl Contract {
             .entry(usdc_id.clone())
             .or_insert_with(Totals::default);
         usdc_totals.held += expected_fee;
-        // reserved was pre-incremented in sleeve; reflect in totals
         usdc_totals.reserved += floor_usdc;
-        // The sleeve's free_usdc was already decremented by floor_usdc in mt_on_transfer;
-        // mirror that decrement in the global free total before adding sleeve_fee back.
         usdc_totals.free = usdc_totals.free.saturating_sub(floor_usdc);
         usdc_totals.platform += platform_fee;
-        // sleeve_fee flows to free side via sleeve.free_usdc
         usdc_totals.free += sleeve_fee;
 
         // Add sleeve_fee to sleeve free balance

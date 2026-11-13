@@ -113,6 +113,7 @@ pub struct Roles {
     /// Named admin accounts (owner always has admin rights too).
     pub admins: Vec<AccountId>,
     /// Named quote-signer keys: key_id → 32-byte Ed25519 public key.
+    /// Key stored as string (e.g. "0", "1") matching the u8 key_id in FloorQuote.
     pub quote_signer_keys: HashMap<String, [u8; 32]>,
 }
 
@@ -183,6 +184,7 @@ pub struct Totals {
     pub credits: u128,
     pub pending: u128,
 }
+
 
 /// BorshStorageKey for nested collections inside a Sleeve.
 /// The sleeve_id is embedded so every sleeve gets a unique prefix.

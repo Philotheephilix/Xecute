@@ -5,7 +5,7 @@ use near_sdk::json_types::U128;
 use near_sdk::{env, near, AccountId, Gas, NearToken, Promise};
 
 // ---------------------------------------------------------------------------
-// Cross-contract: intents.near mt_transfer and USDC ft_transfer
+// Cross-contract: intents.near mt_transfer
 // ---------------------------------------------------------------------------
 
 #[near_sdk::ext_contract(ext_intents)]
@@ -17,17 +17,6 @@ pub trait Intents {
         token_id: String,
         amount: U128,
         approval: Option<(AccountId, u64)>,
-        memo: Option<String>,
-    );
-}
-
-#[near_sdk::ext_contract(ext_usdc)]
-pub trait UsdcContract {
-    #[payable]
-    fn ft_transfer(
-        &mut self,
-        receiver_id: AccountId,
-        amount: U128,
         memo: Option<String>,
     );
 }
@@ -93,7 +82,6 @@ impl Contract {
         let decimals_pow = 10u128.pow(u32::from(asset_config.decimals));
         let payout_usdc = floor_div_u128(floor.qty, floor.floor_price_e6, decimals_pow);
 
-        let _asset = floor.asset.clone();
         let sleeve_id = floor.sleeve.clone();
         let qty = floor.qty;
         let reserved_usdc = floor.reserved_usdc;
@@ -126,12 +114,13 @@ impl Contract {
             &crate::events::FloorPayoutPendingEvent { floor_id }
         );
 
-        // Cross-contract: transfer USDC to owner
-        let usdc_account: AccountId = usdc_id.parse().expect("invalid usdc account");
-        ext_usdc::ext(usdc_account)
+        // Cross-contract: transfer USDC to owner via intents.mt_transfer
+        // params.usdc is the token_id (nep141:... string), params.intents is the contract
+        let intents_contract = self.params.intents.clone();
+        ext_intents::ext(intents_contract)
             .with_attached_deposit(NearToken::from_yoctonear(1))
             .with_static_gas(GAS_TRANSFER)
-            .ft_transfer(caller, U128(payout_usdc), Some("floor payout".to_string()))
+            .mt_transfer(caller, usdc_id, U128(payout_usdc), None, Some("floor payout".to_string()))
             .then(
                 ext_floors_self::ext(env::current_account_id())
                     .with_static_gas(GAS_CALLBACK)
@@ -199,36 +188,33 @@ impl Contract {
             });
 
         } else {
-            // Payout failed: move to credits
+            // H8 fix: Payout failed — revert floor to Active so it can be retried or closed.
+            {
+                let floor_mut = self.floors.get_mut(&floor_id).unwrap();
+                floor_mut.status = FloorStatus::Active;
+            }
+
+            // Revert totals: move pending back to reserved
             {
                 let t = self.totals.entry(usdc_id.clone()).or_insert_with(Totals::default);
                 t.pending = t.pending.saturating_sub(payout_usdc);
-                t.credits += payout_usdc;
+                t.reserved += payout_usdc;
             }
-            let owner = floor.owner.clone();
-            let credit_key = (owner.clone(), usdc_id.clone());
-            let existing = self.credits.get(&credit_key).copied().unwrap_or(0);
-            self.credits.insert(credit_key, existing + payout_usdc);
 
-            // Floor stays in PayoutPending; move escrow to delivered so assets are tracked
-            {
-                let t = self.totals.entry(floor.asset.clone()).or_insert_with(Totals::default);
-                t.escrow = t.escrow.saturating_sub(asset_qty);
-                t.delivered += asset_qty;
-            }
+            // Restore sleeve reservation
             {
                 if let Some(sleeve) = self.sleeves.get_mut(&floor.sleeve) {
-                    let delivered = sleeve.delivered.entry(floor.asset.clone()).or_insert(0);
-                    *delivered += asset_qty;
+                    sleeve.reserved_usdc += payout_usdc;
                 }
             }
 
+            let owner = floor.owner.clone();
             crate::events::emit_payout_failed(&crate::events::PayoutFailedEvent {
                 floor_id: floor_id.to_string(),
                 owner: owner.to_string(),
                 asset: usdc_id,
                 amount: payout_usdc.to_string(),
-                reason: "ft_transfer failed".to_string(),
+                reason: "mt_transfer failed".to_string(),
             });
         }
 
@@ -334,45 +320,71 @@ impl Contract {
         }
     }
 
-    /// Expire a floor that has passed its expiry timestamp.
-    /// Permissionless — anyone can call.
-    pub fn expire(&mut self, floor_id: u64) -> Promise {
-        let floor = self.floors.get(&floor_id)
-            .unwrap_or_else(|| env::panic_str("E_FLOOR_NOT_FOUND"));
+    /// Expire floors that have passed their expiry timestamp.
+    /// Permissionless — anyone can call. Processes up to `expire_batch_max` ids.
+    /// H7: batch expire. L4: #[payable].
+    #[payable]
+    pub fn expire(&mut self, ids: Vec<u64>) -> Vec<Promise> {
+        near_sdk::require!(!ids.is_empty(), "E_BAD_MSG: ids must not be empty");
 
-        near_sdk::require!(floor.status == FloorStatus::Active, "E_FLOOR_NOT_ACTIVE");
-        near_sdk::require!(
-            env::block_timestamp() >= floor.expires_ns,
-            "E_FLOOR_NOT_EXPIRED: floor has not expired yet"
-        );
+        let batch_max = usize::from(self.params.expire_batch_max).max(1);
+        let intents = self.params.intents.clone();
+        let current_account = env::current_account_id();
 
-        let qty = floor.qty;
-        let reserved_usdc = floor.reserved_usdc;
-        let asset = floor.asset.clone();
-        let sleeve_id = floor.sleeve.clone();
-        let owner = floor.owner.clone();
+        let mut promises = Vec::new();
+        let gas_per_floor: u64 = GAS_TRANSFER.as_gas() + GAS_CALLBACK.as_gas();
 
-        // Transition to ExpirePending before cross-contract transfer (reentrancy guard)
-        {
-            let floor_mut = self.floors.get_mut(&floor_id).unwrap();
-            floor_mut.status = FloorStatus::ExpirePending;
+        for (i, floor_id) in ids.iter().copied().enumerate() {
+            // Enforce batch limit
+            if i >= batch_max {
+                break;
+            }
+            // Guard against gas exhaustion
+            let used = env::used_gas().as_gas();
+            let total = env::prepaid_gas().as_gas();
+            if total.saturating_sub(used) < gas_per_floor * 2 {
+                break;
+            }
+
+            let floor = match self.floors.get(&floor_id) {
+                Some(f) => f.clone(),
+                None => continue,
+            };
+
+            if floor.status != FloorStatus::Active {
+                continue;
+            }
+            if env::block_timestamp() < floor.expires_ns {
+                continue;
+            }
+
+            let qty = floor.qty;
+            let reserved_usdc = floor.reserved_usdc;
+            let asset = floor.asset.clone();
+            let sleeve_id = floor.sleeve.clone();
+            let owner = floor.owner.clone();
+
+            // Transition to ExpirePending (reentrancy guard)
+            {
+                let floor_mut = self.floors.get_mut(&floor_id).unwrap();
+                floor_mut.status = FloorStatus::ExpirePending;
+            }
+
+            self.finalize_expire_state(floor_id, qty, reserved_usdc, &asset, &sleeve_id);
+
+            let p = ext_intents::ext(intents.clone())
+                .with_attached_deposit(NearToken::from_yoctonear(1))
+                .with_static_gas(GAS_TRANSFER)
+                .mt_transfer(owner, asset, U128(qty), None, Some("expire floor".to_string()))
+                .then(
+                    ext_floors_self::ext(current_account.clone())
+                        .with_static_gas(GAS_CALLBACK)
+                        .on_expire_transfer(floor_id, U128(qty)),
+                );
+            promises.push(p);
         }
 
-        // Update state before the transfer
-        self.finalize_expire_state(floor_id, qty, reserved_usdc, &asset, &sleeve_id);
-
-        let intents = self.params.intents.clone();
-
-        // Transfer tokens back to owner
-        ext_intents::ext(intents)
-            .with_attached_deposit(NearToken::from_yoctonear(1))
-            .with_static_gas(GAS_TRANSFER)
-            .mt_transfer(owner, asset, U128(qty), None, Some("expire floor".to_string()))
-            .then(
-                ext_floors_self::ext(env::current_account_id())
-                    .with_static_gas(GAS_CALLBACK)
-                    .on_expire_transfer(floor_id, U128(qty)),
-            )
+        promises
     }
 
     #[private]
@@ -422,7 +434,7 @@ impl Contract {
         }
     }
 
-    /// Retry a payout for a floor in PayoutPending state.
+    /// Retry a payout for a floor in PayoutPending state (legacy credit path).
     /// Permissionless.
     pub fn retry_payout(&mut self, floor_id: u64) -> Promise {
         let floor = self.floors.get(&floor_id)
@@ -447,11 +459,11 @@ impl Contract {
         }
         self.credits.remove(&credit_key);
 
-        let usdc_account: AccountId = usdc_id.parse().expect("invalid usdc account");
-        ext_usdc::ext(usdc_account)
+        let intents_contract = self.params.intents.clone();
+        ext_intents::ext(intents_contract)
             .with_attached_deposit(NearToken::from_yoctonear(1))
             .with_static_gas(GAS_TRANSFER)
-            .ft_transfer(owner, U128(credit_amount), Some("retry payout".to_string()))
+            .mt_transfer(owner, usdc_id, U128(credit_amount), None, Some("retry payout".to_string()))
             .then(
                 ext_floors_self::ext(env::current_account_id())
                     .with_static_gas(GAS_CALLBACK)
@@ -551,13 +563,13 @@ impl Contract {
 
     fn finalize_expire_state(
         &mut self,
-        _floor_id: u64,
+        floor_id: u64,
         qty: u128,
         reserved_usdc: u128,
         asset: &str,
         sleeve_id: &str,
     ) {
-        self.finalize_close_state(_floor_id, qty, reserved_usdc, asset, sleeve_id);
+        self.finalize_close_state(floor_id, qty, reserved_usdc, asset, sleeve_id);
     }
 
     fn reverse_close_state(

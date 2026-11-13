@@ -45,9 +45,13 @@ const DepositAddressSchema = z.object({
 const PositionRawSchema = z.object({
   floor_id: z.string(),
   asset: z.string(),
-  amount: z.string(),
+  // API returns qty; legacy may return amount
+  amount: z.string().optional(),
+  qty: z.string().optional(),
   floor_price_usd: z.number().optional(),
+  floor_price_e6: z.string().optional(),
   protected_until: z.string().optional(),
+  expires_at: z.string().optional(),
   status: z.enum(['active', 'expired', 'closed']).optional(),
 });
 
@@ -60,6 +64,17 @@ const SuggestionsSchema = z.object({
   floor_bps: z.number(),
   duration_secs: z.number(),
 });
+
+const ActionChallengeResponseSchema = z.object({
+  wallet_request: z.unknown(),
+  challenge: z.string().regex(/^[0-9a-f]{64}$/, 'challenge must be 64-char hex'),
+}) as z.ZodType<{ wallet_request: unknown; challenge: string }>;
+
+const ActionSubmitResponseSchema = z.object({
+  status_id: z.string(),
+});
+
+// ── Public types ─────────────────────────────────────────────────────────────
 
 export interface Position {
   floor_id: string;
@@ -235,9 +250,9 @@ export async function getDepositAddresses(accountId: string): Promise<DepositAdd
 
 /**
  * Get floor positions for an account.
- * Returns empty array if endpoint not yet available.
+ * H1: Returns { positions, near_balance } — near_balance is the on-chain NEAR balance.
  */
-export async function getPositions(accountId: string): Promise<Position[]> {
+export async function getPositions(accountId: string): Promise<{ positions: Position[]; near_balance: string | null }> {
   let res: Response;
   try {
     res = await fetch(`${BASE_URL}/v1/accounts/${encodeURIComponent(accountId)}/positions`, {
@@ -245,26 +260,29 @@ export async function getPositions(accountId: string): Promise<Position[]> {
     });
   } catch (err) {
     console.warn('[floors] positions fetch failed (network error):', err);
-    return [];
+    return { positions: [], near_balance: null };
   }
 
   if (res.status === 404 || res.status === 501) {
     console.warn('[floors] positions endpoint not yet implemented (status', res.status, ')');
-    return [];
+    return { positions: [], near_balance: null };
   }
 
   const result = await parseResponse(res, PositionsResponseSchema);
-  return result.positions.map((p): Position => {
+  const positions = result.positions.map((p): Position => {
     const pos: Position = {
       floor_id: p.floor_id,
       asset: p.asset,
-      amount: p.amount,
+      // API returns qty; some older responses use amount
+      amount: p.qty ?? p.amount ?? '0',
       status: p.status ?? 'active',
     };
     if (p.floor_price_usd !== undefined) pos.floor_price_usd = p.floor_price_usd;
     if (p.protected_until !== undefined) pos.protected_until = p.protected_until;
+    if (p.expires_at !== undefined && pos.protected_until === undefined) pos.protected_until = p.expires_at;
     return pos;
   });
+  return { positions, near_balance: result.near_balance ?? null };
 }
 
 /**
@@ -283,23 +301,53 @@ export async function getSuggestions(): Promise<{ floor_bps: number; duration_se
 }
 
 /**
- * Submit an action (sell_to_floor, close) for a floor position.
- * TODO: add passkey signing
- * TODO: add Authorization: Bearer <session_token> header — API returns 401 without it
+ * Request phase for a floor action: returns a wallet_request and challenge to sign.
+ * C1: Step 1 of the two-step pattern — get challenge from API.
+ */
+export async function getActionChallenge(
+  accountId: string,
+  action: 'sell_to_floor' | 'close',
+  floorId: string,
+): Promise<{ wallet_request: unknown; challenge: string }> {
+  const res = await fetch(
+    `${BASE_URL}/v1/accounts/${encodeURIComponent(accountId)}/actions`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action, floor_id: floorId }),
+    },
+  );
+  return parseResponse(res, ActionChallengeResponseSchema);
+}
+
+/**
+ * Submit a floor action (sell_to_floor, close) authenticated with a WebAuthn assertion.
+ * C1: Step 3 — submit signed request.
+ *
+ * Two-step pattern identical to enableTrading:
+ * 1. Get challenge from getActionChallenge()
+ * 2. WebAuthn sign the challenge (caller provides assertion)
+ * 3. Call this function with the assertion
  */
 export async function submitAction(params: {
   action: 'sell_to_floor' | 'close';
   floor_id: string;
+  account_id: string;
+  assertion: { signature: string; credential_id: string; wallet_request: unknown };
 }): Promise<{ ok: boolean }> {
   const res = await fetch(`${BASE_URL}/v1/actions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ floor_id: params.floor_id, action: params.action }),
+    body: JSON.stringify({
+      action: params.action,
+      floor_id: params.floor_id,
+      account_id: params.account_id,
+      signature: params.assertion.signature,
+      credential_id: params.assertion.credential_id,
+      wallet_request: params.assertion.wallet_request,
+    }),
   });
-  if (!res.ok) {
-    const json = await res.json().catch(() => ({})) as { error?: string };
-    throw new ApiError(json.error ?? `HTTP ${res.status}`, res.status);
-  }
+  await parseResponse(res, ActionSubmitResponseSchema);
   return { ok: true };
 }
 

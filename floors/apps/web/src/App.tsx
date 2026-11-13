@@ -4,8 +4,8 @@ import InviteCode from './screens/InviteCode';
 import CreatePasskey from './screens/CreatePasskey';
 import CreatingAccount from './screens/CreatingAccount';
 import AccountReady from './screens/AccountReady';
-import SetupDefaults from './screens/SetupDefaults';
 import EnableTrading from './screens/EnableTrading';
+import SetupDefaults from './screens/SetupDefaults';
 import Fund from './screens/Fund';
 import Portfolio from './screens/Portfolio';
 
@@ -15,8 +15,8 @@ export type Screen =
   | 'create-passkey'
   | 'creating-account'
   | 'account-ready'
-  | 'setup-defaults'
   | 'enable-trading'
+  | 'setup-defaults'
   | 'fund'
   | 'portfolio';
 
@@ -36,8 +36,8 @@ const SCREEN_ORDER: Screen[] = [
   'create-passkey',
   'creating-account',
   'account-ready',
-  'setup-defaults',
   'enable-trading',
+  'setup-defaults',
   'fund',
   'portfolio',
 ];
@@ -135,10 +135,10 @@ export default function App() {
         return <CreatingAccount {...props} />;
       case 'account-ready':
         return <AccountReady {...props} />;
-      case 'setup-defaults':
-        return <SetupDefaults {...props} />;
       case 'enable-trading':
         return <EnableTrading {...props} />;
+      case 'setup-defaults':
+        return <SetupDefaults {...props} />;
       case 'fund':
         return <Fund {...props} />;
       case 'portfolio':

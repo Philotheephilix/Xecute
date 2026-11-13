@@ -23,14 +23,14 @@ impl Contract {
 }
 
 // ---------------------------------------------------------------------------
-// Signature verification
+// Canonical signing message builder
 // ---------------------------------------------------------------------------
 
-/// Verify an Ed25519 signature over the canonical FLOORS_QUOTE/V1 payload.
+/// Build the canonical message bytes for a QuotePayload.
 ///
 /// Message layout (matches TypeScript signing.ts QuotePayload):
 ///   b"FLOORS_QUOTE/V1"  (15 bytes, no length prefix)
-///   id[32]             (32 bytes raw, no length prefix — it's a fixed array)
+///   id[32]             (32 bytes raw)
 ///   owner              (4-byte LE length + UTF-8 bytes)
 ///   asset              (4-byte LE length + UTF-8 bytes)
 ///   qty                (16 bytes LE u128)
@@ -39,36 +39,9 @@ impl Contract {
 ///   sleeve             (4-byte LE length + UTF-8 bytes)
 ///   expires_at         (8 bytes LE u64 — Unix seconds, not nanoseconds)
 ///
-/// Uses `near_sdk::env::ed25519_verify` (NEAR host function).
-pub fn verify_quote_sig(
-    quote_id: &[u8; 32],
-    owner: &str,
-    asset: &str,
-    qty: u128,
-    floor_price_e6: u128,
-    fee_usdc: u128,
-    sleeve: &str,
-    expires_at: u64, // Unix seconds
-    sig: &[u8; 64],
-    pubkey: &[u8; 32],
-) -> bool {
-    let message = build_quote_message(
-        quote_id,
-        owner,
-        asset,
-        qty,
-        floor_price_e6,
-        fee_usdc,
-        sleeve,
-        expires_at,
-    );
-    near_sdk::env::ed25519_verify(sig, &message, pubkey)
-}
-
-/// Build the canonical message bytes for a QuotePayload.
-/// Exposed separately so tests can compute the expected bytes without
-/// going through `env::ed25519_verify`.
-pub(crate) fn build_quote_message(
+/// This is the single canonical format used both on-chain (via quote_signing_message
+/// in receivers.rs) and in tests.
+pub fn build_quote_message(
     quote_id: &[u8; 32],
     owner: &str,
     asset: &str,

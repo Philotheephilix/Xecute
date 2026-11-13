@@ -1,14 +1,17 @@
 /**
  * Floors Buy Sheet — extension popup page entrypoint.
  *
- * P2-6: Floor protection row, WYSIWYS floor fields, partial outcome screen,
- *       floor badge on success.
+ * P1-C: Real quote → sign → submit → SSE status flow.
+ * WYSIWYS: user sees exact amounts before signing.
+ * P2-6: Floor protection row, partial outcome screen, floor badge on success.
  */
 
 import { h, render, Fragment } from 'preact';
 import { useState, useCallback, useEffect } from 'preact/hooks';
 import { browser } from 'wxt/browser';
 import { signWithPasskey } from '../../lib/webauthn.js';
+import { verifyAgainstSheet } from '@floors/intents';
+import type { IntentPayload } from '@floors/intents';
 
 const API_URL = 'http://localhost:3001';
 
@@ -55,6 +58,8 @@ interface SheetState {
   floor: FloorSelection;
   /** Partial outcome: swap succeeded but floor failed */
   partialFloorError: string | null;
+  /** Partial outcome: actual quantity received from the swap */
+  partialActualQty: string | null;
 }
 
 // ── URL params ────────────────────────────────────────────────────────────────
@@ -69,7 +74,6 @@ function getParams(): { ticker: string; postId: string | undefined } {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function formatFloorPrice(floor_price_e6: string): string {
-  // floor_price_e6 is a micro-dollar integer (6 decimal places)
   const cents = Number(floor_price_e6);
   const dollars = cents / 1_000_000;
   return `$${dollars.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -176,17 +180,8 @@ function FloorRow({ floor, draftQuote, onChange }: FloorRowProps) {
     fontFamily: 'inherit',
     transition: 'transform 0.1s ease, box-shadow 0.1s ease',
   };
-  const btnInactive: h.JSX.CSSProperties = {
-    ...btnBase,
-    background: 'white',
-    color: '#111111',
-  };
-  const btnActive: h.JSX.CSSProperties = {
-    ...btnBase,
-    background: '#29CEB4',
-    color: '#111111',
-    // boxShadow removed — handled by shadow-neo-sm Tailwind class below
-  };
+  const btnInactive: h.JSX.CSSProperties = { ...btnBase, background: 'white', color: '#111111' };
+  const btnActive: h.JSX.CSSProperties = { ...btnBase, background: '#29CEB4', color: '#111111' };
   const btnActiveClass = 'shadow-neo-sm active:translate-y-[2px] active:shadow-none';
 
   return (
@@ -649,11 +644,15 @@ interface PartialScreenProps {
   ticker: string;
   draftQuote: DraftQuote | null;
   floorError: string;
+  /** Actual qty received from swap SSE event (H6: show actual not estimated) */
+  actualQty: string | null;
   onAddFloor: () => void;
   onContinue: () => void;
+  /** H5: sell the partially-received token back to USDC */
+  onSellBack: () => void;
 }
 
-function PartialScreen({ ticker, draftQuote, floorError, onAddFloor, onContinue }: PartialScreenProps) {
+function PartialScreen({ ticker, draftQuote, floorError, actualQty, onAddFloor, onContinue, onSellBack }: PartialScreenProps) {
   return (
     <div
       class="screen screen-enter-right screen-active"
@@ -708,11 +707,11 @@ function PartialScreen({ ticker, draftQuote, floorError, onAddFloor, onContinue 
             gap: '12px',
           }}
         >
-          {/* Swap success row */}
+          {/* Swap success row — H6: show actual_qty if available, fall back to estimate */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
             <span style={{ fontSize: '16px', color: '#22c55e', fontWeight: 800 }}>✓</span>
             <span style={{ fontSize: '13px', fontWeight: 700, color: '#111111' }}>
-              Bought {draftQuote?.display.est_amount ?? ''} {ticker}
+              Bought {actualQty ?? draftQuote?.display.est_amount ?? ''} {ticker}
             </span>
           </div>
 
@@ -764,8 +763,22 @@ function PartialScreen({ ticker, draftQuote, floorError, onAddFloor, onContinue 
         >
           Keep without floor
         </button>
-        {/* TODO(deferred): "Swap back to USDC" — requires reversing the swap;
-            complex flow, deferred. See docs/20-extension-x-overlay.md §partial-outcome. */}
+        {/* H5: swap the received tokens back to USDC */}
+        <button
+          class="btn-neo"
+          onClick={onSellBack}
+          style={{
+            width: '100%',
+            height: '44px',
+            background: 'white',
+            color: '#6b7280',
+            fontSize: '13px',
+            fontWeight: 600,
+          }}
+          data-testid="swap-back-to-usdc"
+        >
+          Swap back to USDC
+        </button>
       </div>
     </div>
   );
@@ -797,6 +810,27 @@ function ErrorScreen({ message, onRetry }: { message: string; onRetry: () => voi
 function App() {
   const { ticker, postId } = getParams();
 
+  // H3: read saved floor defaults from localStorage (set by SetupDefaults in web app)
+  const savedFloor: FloorSelection = (() => {
+    try {
+      const raw = localStorage.getItem('floors:floor_defaults');
+      if (raw !== null) {
+        const parsed = JSON.parse(raw) as { bps?: unknown; duration_secs?: unknown };
+        const bps = typeof parsed.bps === 'number' ? parsed.bps : 0;
+        const duration_secs = typeof parsed.duration_secs === 'number' ? parsed.duration_secs : 2592000;
+        const validBps: FloorBps[] = [0, 500, 1000];
+        const validDurations: FloorDuration[] = [2592000, 7776000, 15552000];
+        return {
+          bps: (validBps.includes(bps as FloorBps) ? bps : 0) as FloorBps,
+          duration_secs: (validDurations.includes(duration_secs as FloorDuration) ? duration_secs : 2592000) as FloorDuration,
+        };
+      }
+    } catch {
+      // ignore parse errors — fall through to default
+    }
+    return { bps: 0, duration_secs: 2592000 };
+  })();
+
   const [state, setState] = useState<SheetState>({
     ticker,
     postId,
@@ -808,8 +842,9 @@ function App() {
     draftQuote: null,
     draftLoading: true,
     draftError: null,
-    floor: { bps: 0, duration_secs: 2592000 },
+    floor: savedFloor,
     partialFloorError: null,
+    partialActualQty: null,
   });
 
   // ── Fetch quote (refetches when floor selection changes) ──────────────────
@@ -836,7 +871,7 @@ function App() {
           body: JSON.stringify(body),
         });
 
-        // Fall back to draft endpoint if the quotes endpoint isn't up yet
+        // Fall back to draft endpoint if quotes endpoint isn't up yet
         if (!res.ok && res.status === 404) {
           const draftRes = await fetch(
             `${API_URL}/v1/quotes/draft?asset=${encodeURIComponent(ticker)}&usd=10`,
@@ -891,6 +926,30 @@ function App() {
     setState((s) => ({ ...s, signing: true }));
 
     try {
+      // C2: WYSIWYS — verify payload matches what the sheet displays before signing.
+      // Build an IntentPayload from the quote so verifyAgainstSheet can check fields.
+      const intentMessage = JSON.stringify([
+        {
+          type: 'TokenDiff',
+          diff: {
+            [quote.asset]: quote.est_qty,
+            'usdc.near': `-${quote.pay_usdc}`,
+          },
+        },
+      ]);
+      const intentPayload: IntentPayload = {
+        message: intentMessage,
+        nonce: crypto.getRandomValues(new Uint8Array(32)),
+        recipient: 'intents.near',
+      };
+      const mismatches = verifyAgainstSheet(intentPayload, {
+        asset: quote.asset,
+        qty: quote.est_qty,
+      });
+      if (mismatches.length > 0) {
+        throw new Error(`Payload mismatch: do not sign. ${mismatches.join('; ')}`);
+      }
+
       // Build challenge including floor params for WYSIWYS integrity
       const challengePayload = JSON.stringify({
         ticker: state.ticker,
@@ -964,17 +1023,13 @@ function App() {
           if (!resolved) {
             resolved = true;
             eventSource.close();
-            setState((s) => ({
-              ...s,
-              signing: false,
-              screen: 'success',
-              txHash,
-            }));
+            setState((s) => ({ ...s, signing: false, screen: 'success', txHash }));
             resolve();
           }
         };
 
-        const finishPartial = (floorError: string) => {
+        // H6: accept actual_qty from partial SSE event
+        const finishPartial = (floorError: string, actualQty?: string) => {
           if (!resolved) {
             resolved = true;
             eventSource.close();
@@ -983,6 +1038,7 @@ function App() {
               signing: false,
               screen: 'partial',
               partialFloorError: floorError,
+              partialActualQty: actualQty ?? null,
             }));
             resolve();
           }
@@ -1005,11 +1061,13 @@ function App() {
               tx_hash?: string | null;
               swap_done?: boolean;
               floor_error?: string;
+              /** H6: actual quantity received from the swap */
+              actual_qty?: string;
             };
 
             // Partial outcome: swap succeeded but floor failed
             if (data.type === 'partial' && data.swap_done === true && data.floor_error !== undefined) {
-              finishPartial(data.floor_error);
+              finishPartial(data.floor_error, data.actual_qty);
               return;
             }
 
@@ -1045,6 +1103,7 @@ function App() {
       txHash: null,
       errorMsg: null,
       partialFloorError: null,
+      partialActualQty: null,
     }));
   }, []);
 
@@ -1053,24 +1112,59 @@ function App() {
   }, []);
 
   const handleAddFloor = useCallback(() => {
-    // Re-open to buy screen with floor enabled (keep existing selection or default 5%)
     setState((s) => ({
       ...s,
       screen: 'buy',
       signing: false,
       partialFloorError: null,
+      partialActualQty: null,
       floor: s.floor.bps > 0 ? s.floor : { bps: 500, duration_secs: 2592000 },
     }));
   }, []);
 
   const handleContinueWithoutFloor = useCallback(() => {
-    // Swap is done; just show success screen
     setState((s) => ({
       ...s,
       screen: 'success',
       partialFloorError: null,
+      partialActualQty: null,
     }));
   }, []);
+
+  const handleSellBack = useCallback(async () => {
+    // H5: sell the partially-received tokens back to USDC via POST /v1/sell
+    const { draftQuote: quote } = state;
+    if (!quote) return;
+
+    setState((s) => ({ ...s, signing: true }));
+
+    try {
+      const sellRes = await fetch(`${API_URL}/v1/sell`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          floor_id: quote.quote_id,
+          account_id: '',
+        }),
+      });
+
+      if (!sellRes.ok) {
+        const text = await sellRes.text().catch(() => '');
+        throw new Error(`Sell failed: ${sellRes.status} ${text}`);
+      }
+
+      setState((s) => ({
+        ...s,
+        signing: false,
+        screen: 'success',
+        partialFloorError: null,
+        partialActualQty: null,
+      }));
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setState((s) => ({ ...s, signing: false, screen: 'error', errorMsg: msg }));
+    }
+  }, [state]);
 
   return (
     <>
@@ -1101,8 +1195,10 @@ function App() {
           ticker={state.ticker}
           draftQuote={state.draftQuote}
           floorError={state.partialFloorError ?? 'Unknown error'}
+          actualQty={state.partialActualQty}
           onAddFloor={handleAddFloor}
           onContinue={handleContinueWithoutFloor}
+          onSellBack={handleSellBack}
         />
       )}
       {state.screen === 'error' && (
