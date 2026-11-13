@@ -66,7 +66,7 @@ export default function CreatePasskey({ navigate, setAccount, account, className
 
         {/* Title */}
         <h1 className="text-3xl font-extrabold text-[#111] leading-tight mb-3">
-          Secure Your Account
+          Create Your Passkey
         </h1>
         <p className="text-base font-semibold text-gray-600 leading-relaxed mb-10">
           Your passkey replaces passwords. It stays on your device and can never be stolen.

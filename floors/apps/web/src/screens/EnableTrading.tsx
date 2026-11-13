@@ -88,7 +88,7 @@ export default function EnableTrading({ navigate, account, className }: Props) {
   const isLoading = phase === 'requesting' || phase === 'signing' || phase === 'submitting' || phase === 'skipping';
 
   const phaseLabel: Record<Phase, string> = {
-    idle: 'Enable Trading (one tap)',
+    idle: 'Enable Trading',
     requesting: 'Preparing…',
     signing: 'Waiting for fingerprint…',
     submitting: 'Registering on NEAR…',
@@ -117,10 +117,10 @@ export default function EnableTrading({ navigate, account, className }: Props) {
 
         {/* Title */}
         <h1 className="text-3xl font-extrabold text-[#111] leading-tight mb-3">
-          One tap to start trading
+          Register with NEAR Intents
         </h1>
         <p className="text-base font-semibold text-gray-600 leading-relaxed mb-10">
-          One fingerprint registers your key on NEAR Intents — the protocol that powers instant swaps.
+          One fingerprint registers your passkey with NEAR Intents.
         </p>
 
         {/* Illustration */}
@@ -149,7 +149,6 @@ export default function EnableTrading({ navigate, account, className }: Props) {
           {[
             'Registers your passkey with NEAR Intents',
             'Required to buy and sell crypto',
-            'One-time fingerprint — never repeated',
           ].map((feat) => (
             <div key={feat} className="flex items-start gap-3">
               <div className="w-5 h-5 shrink-0 mt-0.5 rounded-full bg-[#9662FF] border-2 border-[#111] flex items-center justify-center">

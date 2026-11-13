@@ -311,9 +311,6 @@ function BuyScreen({ state, onConfirm, onBack, onFloorChange }: BuyScreenProps) 
           <BackArrow />
         </button>
         <div style={{ flex: 1 }}>
-          <div style={{ fontSize: '13px', fontWeight: 600, color: '#111111', lineHeight: 1.2 }}>
-            Buy Crypto
-          </div>
           <div style={{ fontSize: '20px', fontWeight: 800, color: '#111111', lineHeight: 1.2 }}>
             Buy ${ticker}
           </div>
@@ -364,7 +361,7 @@ function BuyScreen({ state, onConfirm, onBack, onFloorChange }: BuyScreenProps) 
 
           {draftLoading && (
             <div style={{ fontSize: '14px', color: '#6b7280', textAlign: 'center', padding: '8px 0' }}>
-              Fetching best price...
+              Fetching quote…
             </div>
           )}
 
@@ -489,7 +486,7 @@ function SigningScreen({ statusId }: { statusId: string | null }) {
       <style>{`@keyframes floors-spin { to { transform: rotate(360deg); } }`}</style>
       <span style={{ display: 'inline-block', width: 20, height: 20, border: '2px solid #111', borderTopColor: 'transparent', borderRadius: '50%', animation: 'floors-spin 0.8s linear infinite', marginBottom: '12px' }} />
       <div style={{ fontSize: '16px', fontWeight: 700, color: '#111111', marginBottom: '8px' }}>
-        Submitting Order...
+        Submitting order…
       </div>
       {statusId !== null && (
         <div style={{ fontSize: '12px', color: '#6b7280' }} data-testid="status-id">
@@ -554,7 +551,7 @@ function SuccessScreen({ ticker, draftQuote, statusId, txHash, floorIncluded, fl
           <div style={{ fontSize: '13px', fontWeight: 600, color: '#6b7280', marginTop: '6px' }}>
             {floorIncluded
               ? 'Your position is protected by a floor'
-              : 'Your buy order is being processed'}
+              : 'Confirming on-chain — check your portfolio in a moment.'}
           </div>
         </div>
 
@@ -710,7 +707,7 @@ function PartialScreen({ ticker, draftQuote, floorError, actualQty, onAddFloor, 
             Partially Completed
           </div>
           <div style={{ fontSize: '13px', fontWeight: 600, color: '#6b7280', marginTop: '6px' }}>
-            One step didn't finish
+            Floor wasn't added
           </div>
         </div>
 

@@ -53,9 +53,9 @@ export default function AccountReady({ navigate, account, className }: Props) {
           </div>
         </div>
 
-        <h1 className="text-3xl font-extrabold text-[#111] text-center">Account Ready!</h1>
+        <h1 className="text-3xl font-extrabold text-[#111] text-center">Wallet Created</h1>
         <p className="text-base font-semibold text-[#111111] text-center mt-2">
-          Your NEAR wallet is live and secured.
+          Protected by your device passkey.
         </p>
       </div>
 
@@ -72,7 +72,6 @@ export default function AccountReady({ navigate, account, className }: Props) {
         <div className="flex flex-col gap-3">
           {[
             'Secured by your device passkey',
-            'Instant NEAR transactions',
             'Buy crypto directly from X posts',
           ].map((feat) => (
             <div key={feat} className="flex items-center gap-3">
