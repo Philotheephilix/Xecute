@@ -4,6 +4,11 @@ import { registerRiskQuoteRoutes } from './routes/quotes.js';
 
 const RiskConfigSchema = BaseConfigSchema.extend({
   SERVICE_NAME: z.string().default('risk'),
+  /** 32-byte Ed25519 private key seed encoded as 64 hex characters */
+  RISK_SIGNING_KEY_HEX: z
+    .string()
+    .length(64, 'RISK_SIGNING_KEY_HEX must be 64 hex characters (32-byte seed)')
+    .regex(/^[0-9a-fA-F]{64}$/, 'RISK_SIGNING_KEY_HEX must be hex'),
 });
 
 const config = loadConfig(RiskConfigSchema);
