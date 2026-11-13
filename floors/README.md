@@ -234,7 +234,7 @@ Output: `contracts/target/wasm32-unknown-unknown/release/floors.wasm`
 
 ```sh
 # Unit tests (no network)
-cargo test --manifest-path contracts/Cargo.toml
+cd contracts/floors && cargo test
 
 # Or via Makefile
 make test-contracts
@@ -418,8 +418,6 @@ apps/extension/
     content/          # Content script — chip injection into X posts
     entrypoints/
       sheet/          # Buy sheet side-panel (React)
-    pages/            # (none — deleted; entrypoints/ is the active path)
-
 apps/web/
   src/
     api/              # API client
@@ -452,6 +450,6 @@ contracts/floors/
 
 ## Contributing
 
-All files require review from `@philotheephilix`. Contract changes under `contracts/` require two approvals (enforced via branch protection).
+PRs require review from `@philotheephilix`. Contract changes under `contracts/` require two approvals.
 
-No mocks in tests. All tests run against real infrastructure — CDP virtual WebAuthn for passkeys, real Postgres, real NEAR sandbox.
+**No mocks.** Tests run against real infrastructure — CDP virtual WebAuthn for passkeys, real Postgres, real NEAR sandbox or testnet. `page.route()`, `vi.mock()`, and stubbed responses are not allowed.
