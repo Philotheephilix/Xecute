@@ -1,9 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createAccount, getAccount } from './client';
 
-// Mock import.meta.env
-vi.mock('../env', () => ({ VITE_API_URL: 'http://localhost:3001' }));
-
 describe('createAccount', () => {
   beforeEach(() => {
     vi.stubGlobal('fetch', vi.fn());

@@ -41,12 +41,19 @@ export default function EnableTrading({ navigate, account, className }: Props) {
         return;
       }
 
-      const { wallet_request } = requestResult;
+      const { wallet_request, challenge } = requestResult;
 
       // Step 2: sign challenge with passkey
       setPhase('signing');
-      const challengeStr = JSON.stringify(wallet_request);
-      const challengeBytes = new TextEncoder().encode(challengeStr);
+      // Use the challenge bytes returned by the API — avoids JSON key-order dependency
+      function hexToBytes(hex: string): Uint8Array {
+        const bytes = new Uint8Array(hex.length / 2);
+        for (let i = 0; i < bytes.length; i++) {
+          bytes[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+        }
+        return bytes;
+      }
+      const challengeBytes = hexToBytes(challenge);
 
       const assertion = await signWithPasskey(challengeBytes, credentialId);
 

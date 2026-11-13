@@ -27,10 +27,9 @@ const EnableTradingResponseSchema = z.object({
 });
 
 const EnableTradingRequestSchema = z.object({
-  wallet_request: z.unknown().refine((v): v is unknown => v !== undefined, {
-    message: 'wallet_request is required',
-  }),
-}) as z.ZodType<{ wallet_request: unknown }>;
+  wallet_request: z.unknown(),
+  challenge: z.string().regex(/^[0-9a-f]{64}$/, 'challenge must be 64-char hex'),
+}) as z.ZodType<{ wallet_request: unknown; challenge: string }>;
 
 const DepositAddressSchema = z.object({
   chain: z.string(),
@@ -109,7 +108,7 @@ export async function getAccount(accountId: string): Promise<Account | null> {
  * Fetch a wallet request to sign for enabling trading on intents.near.
  * Returns null if the API endpoint doesn't exist yet (404).
  */
-export async function getEnableTradingRequest(accountId: string): Promise<{ wallet_request: unknown } | null> {
+export async function getEnableTradingRequest(accountId: string): Promise<{ wallet_request: unknown; challenge: string } | null> {
   let res: Response;
   try {
     res = await fetch(`${BASE_URL}/v1/accounts/${encodeURIComponent(accountId)}/enable-trading-request`, {
@@ -175,8 +174,8 @@ export async function getDepositAddresses(accountId: string): Promise<DepositAdd
     return fallbackDepositAddresses(accountId);
   }
 
-  const result = await parseResponse(res, z.array(DepositAddressSchema));
-  return result;
+  const result = await parseResponse(res, z.object({ addresses: z.array(DepositAddressSchema) }));
+  return result.addresses;
 }
 
 function fallbackDepositAddresses(accountId: string): DepositAddress[] {
