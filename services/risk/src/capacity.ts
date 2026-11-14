@@ -19,6 +19,15 @@ const MAX_UTILIZATION_BPS: Record<string, number> = {
   STRK: 2500,
 };
 
+// Per-account cap: default $10K USDC in e6
+const PER_ACCOUNT_CAP_E6: bigint = (() => {
+  const raw = process.env['PER_ACCOUNT_CAP_USDC'];
+  return raw !== undefined ? BigInt(raw) : 10_000_000_000n;
+})();
+
+/** Per-account used notional (e6), keyed by account_id */
+const accountNotional = new Map<string, bigint>();
+
 interface Reservation {
   /** quote ID (hex) */
   quoteId: string;
@@ -28,6 +37,8 @@ interface Reservation {
   notional_e6: bigint;
   /** unix timestamp ms when this reservation expires */
   expiresAt: number;
+  /** NEAR account ID of the floor buyer, if provided */
+  account_id?: string;
 }
 
 // Active reservations
@@ -36,9 +47,15 @@ const reservations = new Map<string, Reservation>();
 /** Purge expired reservations (called before every capacity check). */
 function purgeExpired(): void {
   const now = Date.now();
-  for (const [id, r] of reservations) {
-    if (r.expiresAt <= now) {
+  for (const [id, res] of reservations) {
+    if (res.expiresAt <= now) {
       reservations.delete(id);
+      if (res.account_id !== undefined) {
+        const current = accountNotional.get(res.account_id) ?? 0n;
+        const next = current - res.notional_e6;
+        if (next <= 0n) accountNotional.delete(res.account_id);
+        else accountNotional.set(res.account_id, next);
+      }
     }
   }
 }
@@ -63,24 +80,34 @@ function maxNotional(asset: string): bigint {
 
 /**
  * Check whether adding `additionalNotional` for `asset` would exceed capacity.
+ * Also checks per-account cap if `account_id` is provided.
  * Returns true when there IS capacity (quote can proceed).
  */
-export function hasCapacity(asset: string, additionalNotional_e6: bigint): boolean {
+export function hasCapacity(asset: string, additionalNotional_e6: bigint, account_id?: string): boolean {
   const used = usedNotional(asset);
   const limit = maxNotional(asset);
-  return used + additionalNotional_e6 <= limit;
+  if (used + additionalNotional_e6 > limit) return false;
+
+  if (account_id !== undefined) {
+    const accountUsed = accountNotional.get(account_id) ?? 0n;
+    if (accountUsed + additionalNotional_e6 > PER_ACCOUNT_CAP_E6) return false;
+  }
+
+  return true;
 }
 
 /**
  * Reserve capacity for an in-flight quote.
  * Call AFTER the capacity check passes (hasCapacity returned true).
  * TTL is 20 s to match the quote lifetime.
+ * If `account_id` is provided, also tracks per-account utilization.
  */
 export function reserveCapacity(
   quoteId: string,
   asset: string,
   notional_e6: bigint,
   ttlMs = 20_000,
+  account_id?: string,
 ): void {
   purgeExpired();
   reservations.set(quoteId, {
@@ -88,13 +115,26 @@ export function reserveCapacity(
     asset,
     notional_e6,
     expiresAt: Date.now() + ttlMs,
+    ...(account_id !== undefined ? { account_id } : {}),
   });
+
+  if (account_id !== undefined) {
+    const prev = accountNotional.get(account_id) ?? 0n;
+    accountNotional.set(account_id, prev + notional_e6);
+  }
 }
 
 /**
  * Release a reservation immediately (e.g. quote was rejected on-chain, or test cleanup).
  */
 export function releaseCapacity(quoteId: string): void {
+  const res = reservations.get(quoteId);
+  if (res?.account_id) {
+    const current = accountNotional.get(res.account_id) ?? 0n;
+    const next = current - res.notional_e6;
+    if (next <= 0n) accountNotional.delete(res.account_id);
+    else accountNotional.set(res.account_id, next);
+  }
   reservations.delete(quoteId);
 }
 

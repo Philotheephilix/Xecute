@@ -30,6 +30,25 @@ const HAZARD: Record<string, number> = {
   STRK: 0.001, // long-tail Tier A: 0.1% per day
 };
 
+/** Full NEP-141 asset IDs as used by intents / mt_on_transfer. */
+const NEP141_ASSET_IDS_MAINNET: Record<string, string> = {
+  ETH: 'nep141:eth.omft.near',
+  SOL: 'nep141:sol.omft.near',
+  STRK: 'nep141:strk.omft.near',
+};
+
+const NEP141_ASSET_IDS_TESTNET: Record<string, string> = {
+  ETH: 'nep141:eth.fakes.testnet',
+  SOL: 'nep141:sol.fakes.testnet',
+  STRK: 'nep141:strk.fakes.testnet',
+};
+
+/** Resolved at startup from NEAR_NETWORK_ID env var. */
+const NEP141_ASSET_IDS: Record<string, string> =
+  process.env['NEAR_NETWORK_ID'] === 'mainnet'
+    ? NEP141_ASSET_IDS_MAINNET
+    : NEP141_ASSET_IDS_TESTNET;
+
 /** Sleeve identifier per asset. */
 const SLEEVE: Record<string, string> = {
   ETH: 'majors_sleeve_v1',
@@ -47,10 +66,16 @@ const QuoteRequestSchema = z.object({
   qty: z.string().regex(/^\d+$/, 'qty must be a non-negative integer string'),
   /** Floor level in basis points: 100–5000 (1%–50%) */
   floor_bps: z.number().int().min(100).max(5000),
-  /** Duration in seconds: 1 day to 1 year */
-  duration_secs: z.number().int().min(86_400).max(31_536_000),
+  /** Duration in seconds: 1 hour (testnet min) to 1 year */
+  duration_secs: z.number().int().min(3_600).max(31_536_000),
   /** NEAR account ID of the floor buyer */
   owner: z.string().min(2).max(64),
+  /**
+   * Request expiry as Unix nanoseconds (BigInt string).
+   * Prevents replayed or stale quote requests from generating a fresh quote.
+   * Must be in the future at the time the request is received.
+   */
+  valid_until_ns: z.string().regex(/^\d+$/, 'valid_until_ns must be a non-negative integer string'),
 });
 
 type QuoteRequest = z.infer<typeof QuoteRequestSchema>;
@@ -64,17 +89,65 @@ interface PythPrice {
   conf: number;
   exponent: number;
   publishTime: number;
+  /** True when price came from CoinGecko fallback rather than Pyth */
+  usedFallback?: boolean;
+}
+
+/** CoinGecko asset IDs for fallback pricing */
+const COINGECKO_IDS: Record<string, string> = {
+  ETH: 'ethereum',
+  SOL: 'solana',
+  STRK: 'starknet',
+};
+
+async function fetchPriceFromCoinGecko(asset: string): Promise<PythPrice> {
+  const cgId = COINGECKO_IDS[asset];
+  if (!cgId) throw new FloorApiError('ASSET_NOT_SUPPORTED', `No CoinGecko ID for ${asset}`, false, 400);
+
+  const url = `https://api.coingecko.com/api/v3/simple/price?ids=${cgId}&vs_currencies=usd`;
+  const resp = await fetch(url, {
+    headers: { Accept: 'application/json' },
+    signal: AbortSignal.timeout(8_000),
+  });
+  if (!resp.ok) {
+    throw new FloorApiError('INTERNAL_ERROR', `CoinGecko returned ${resp.status}`, true, 503);
+  }
+  const body = (await resp.json()) as Record<string, { usd: number }>;
+  const price = body[cgId]?.usd;
+  if (!price || price <= 0) {
+    throw new FloorApiError('INTERNAL_ERROR', 'No CoinGecko price data', true, 503);
+  }
+  // Return in Pyth-compatible format; publishTime = now (always fresh from CoinGecko)
+  return {
+    price,
+    conf: price * 0.001, // 0.1% confidence estimate
+    exponent: 0,
+    publishTime: Math.floor(Date.now() / 1000),
+    usedFallback: true,
+  };
 }
 
 async function fetchPythPrice(asset: string): Promise<PythPrice> {
   const feedId = PYTH_FEED_IDS[asset];
   if (!feedId) throw new FloorApiError('ASSET_NOT_SUPPORTED', `No Pyth feed for ${asset}`, false, 400);
 
+  const pythApiKey = process.env['PYTH_API_KEY'];
+  const headers: Record<string, string> = { Accept: 'application/json' };
+  if (pythApiKey) {
+    headers['X-Pyth-API-Key'] = pythApiKey;
+  }
+
   const url = `https://hermes.pyth.network/v2/updates/price/latest?ids[]=${feedId}`;
   const resp = await fetch(url, {
-    headers: { Accept: 'application/json' },
+    headers,
     signal: AbortSignal.timeout(5_000),
   });
+
+  // If Pyth requires auth and we don't have a key, fall back to CoinGecko
+  if (resp.status === 401 || resp.status === 403) {
+    return fetchPriceFromCoinGecko(asset);
+  }
+
   if (!resp.ok) {
     throw new FloorApiError('INTERNAL_ERROR', `Pyth returned ${resp.status}`, true, 503);
   }
@@ -113,12 +186,20 @@ export function registerRiskQuoteRoutes(app: FastifyInstance): void {
       });
     }
 
-    const { asset, qty, floor_bps, duration_secs, owner } = bodyResult.data as QuoteRequest;
+    const { asset, qty, floor_bps, duration_secs, owner, valid_until_ns } = bodyResult.data as QuoteRequest;
+
+    // -----------------------------------------------------------------------
+    // 0. Expiry check: valid_until_ns is nanoseconds; Date.now() is milliseconds
+    // -----------------------------------------------------------------------
+    if (BigInt(valid_until_ns) / 1_000_000n < BigInt(Date.now())) {
+      throw new FloorApiError('QUOTE_EXPIRED', 'Quote request has expired (valid_until_ns is in the past)', false, 400);
+    }
 
     // -----------------------------------------------------------------------
     // 1. Fetch spot price from Pyth
     // -----------------------------------------------------------------------
     let spotPrice: number;
+    let priceUsedFallback = false;
     try {
       const pyth = await fetchPythPrice(asset);
 
@@ -129,9 +210,17 @@ export function registerRiskQuoteRoutes(app: FastifyInstance): void {
       }
 
       spotPrice = pyth.price;
+      priceUsedFallback = pyth.usedFallback ?? false;
     } catch (err) {
       if (err instanceof FloorApiError) throw err;
       throw new FloorApiError('INTERNAL_ERROR', 'Failed to fetch Pyth price', true, 503);
+    }
+
+    if (priceUsedFallback) {
+      request.log.warn(
+        { asset, event: 'coingecko_fallback' },
+        'using CoinGecko fallback price — Pyth unavailable',
+      );
     }
 
     // -----------------------------------------------------------------------
@@ -177,7 +266,7 @@ export function registerRiskQuoteRoutes(app: FastifyInstance): void {
     // notional_e6 = ceil(qty * floor_price_e6 / 10^token_decimals)
     const notional_e6 = (qtyBigint * floor_price_e6 + divisor - 1n) / divisor;
 
-    if (!hasCapacity(asset, notional_e6)) {
+    if (!hasCapacity(asset, notional_e6, owner)) {
       throw new FloorApiError('RATE_LIMITED', 'Sleeve capacity exceeded for this asset', false, 400);
     }
 
@@ -186,13 +275,20 @@ export function registerRiskQuoteRoutes(app: FastifyInstance): void {
     // -----------------------------------------------------------------------
     const quoteIdBytes = generateQuoteId();
     const quoteIdHex = Buffer.from(quoteIdBytes).toString('hex');
-    const expiresAt = BigInt(Math.floor(Date.now() / 1000) + 20); // 20-second lifetime
+    // Use a shorter TTL when falling back to CoinGecko to reduce drift window
+    const quoteTtlSecs = priceUsedFallback ? 60 : 20;
+    const expiresAt = BigInt(Math.floor(Date.now() / 1000) + quoteTtlSecs);
     const sleeve = SLEEVE[asset] ?? 'majors_sleeve_v1';
+
+    const nep141Asset = NEP141_ASSET_IDS[asset];
+    if (!nep141Asset) {
+      throw new FloorApiError('ASSET_NOT_SUPPORTED', `No NEP-141 ID for asset ${asset}`, false, 400);
+    }
 
     const quotePayload: QuotePayload = {
       id: quoteIdBytes,
       owner,
-      asset,
+      asset: nep141Asset,
       qty: qtyBigint,
       floor_price_e6,
       fee_usdc: fee_e6,
@@ -207,7 +303,7 @@ export function registerRiskQuoteRoutes(app: FastifyInstance): void {
     // -----------------------------------------------------------------------
     // 6. Reserve capacity for this in-flight quote (TTL = 20 s)
     // -----------------------------------------------------------------------
-    reserveCapacity(quoteIdHex, asset, notional_e6, 20_000);
+    reserveCapacity(quoteIdHex, asset, notional_e6, quoteTtlSecs * 1000, owner);
 
     // -----------------------------------------------------------------------
     // 7. Log and respond
@@ -225,6 +321,8 @@ export function registerRiskQuoteRoutes(app: FastifyInstance): void {
       'Quote signed',
     );
 
+    const pythFeed = PYTH_FEED_IDS[asset];
+
     return reply.status(200).send({
       quote_id: quoteIdHex,
       floor_price_e6: floor_price_e6.toString(),
@@ -232,8 +330,11 @@ export function registerRiskQuoteRoutes(app: FastifyInstance): void {
       sig: sigBase64,
       sleeve,
       expires_at: Number(expiresAt),
-      asset,
+      asset: nep141Asset,
       qty,
+      owner,
+      pyth_feed: pythFeed ? pythFeed.replace(/^0x/, '') : undefined,
+      key_id: 0,
     });
   });
 }
