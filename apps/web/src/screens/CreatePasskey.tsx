@@ -3,6 +3,9 @@ import type { Screen, AccountState } from '../App';
 import { createPasskey, extractCompressedP256Key, toHex } from '../lib/passkey';
 import { createAccount } from '../api/client';
 
+const REQUIRE_INVITE =
+  (import.meta as ImportMeta & { env: Record<string, string> }).env['VITE_REQUIRE_INVITE'] === 'true';
+
 interface Props {
   navigate: (to: Screen) => void;
   account: AccountState | null;
@@ -13,23 +16,43 @@ interface Props {
 export default function CreatePasskey({ navigate, setAccount, account, className }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [passkeyName, setPasskeyName] = useState('');
 
   const handleCreate = async () => {
     setError(null);
     setLoading(true);
     try {
-      const { credentialId, publicKey, rawPublicKey } = await createPasskey();
+      const { credentialId, publicKey, rawPublicKey } = await createPasskey(passkeyName);
       const compressedKey = extractCompressedP256Key(rawPublicKey);
       const compressedKeyHex = toHex(compressedKey);
       const inviteCode = account?.inviteCode;
       const { account_id } = await createAccount(compressedKeyHex, credentialId, inviteCode);
-      setAccount({
+      const newAccount: AccountState = {
         accountId: account_id,
         credentialId,
         publicKey,
         compressedKeyHex,
         ...(inviteCode !== undefined ? { inviteCode } : {}),
+      };
+      setAccount(newAccount);
+      localStorage.setItem('floors:account_id', newAccount.accountId);
+      localStorage.setItem('floors:credential_id', newAccount.credentialId);
+      localStorage.setItem('floors:public_key', newAccount.publicKey);
+      localStorage.setItem('floors:compressed_key', newAccount.compressedKeyHex);
+      localStorage.setItem('floors:passkey_name', passkeyName.trim());
+
+      // Store multi-passkey registry
+      const existingRaw = localStorage.getItem('floors:passkeys');
+      const existing: Array<{ name: string; credentialId: string; createdAt: string }> = existingRaw
+        ? JSON.parse(existingRaw)
+        : [];
+      existing.push({
+        name: passkeyName.trim(),
+        credentialId,
+        createdAt: new Date().toISOString(),
       });
+      localStorage.setItem('floors:passkeys', JSON.stringify(existing));
+
       navigate('creating-account');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Passkey creation failed');
@@ -44,7 +67,7 @@ export default function CreatePasskey({ navigate, setAccount, account, className
         {/* Header */}
         <div className="flex items-center gap-4 mb-8">
           <button
-            onClick={() => navigate('welcome')}
+            onClick={() => navigate(REQUIRE_INVITE ? 'invite-code' : 'welcome')}
             className="w-11 h-11 bg-white border-2 border-[#111] rounded-[13px] shadow-neo-sm shadow-neo-active flex items-center justify-center"
             aria-label="Go back"
           >
@@ -58,7 +81,7 @@ export default function CreatePasskey({ navigate, setAccount, account, className
 
         {/* Title */}
         <h1 className="text-3xl font-extrabold text-[#111] leading-tight mb-3">
-          Secure Your Account
+          Create Your Passkey
         </h1>
         <p className="text-base font-semibold text-gray-600 leading-relaxed mb-10">
           Your passkey replaces passwords. It stays on your device and can never be stolen.
@@ -110,10 +133,26 @@ export default function CreatePasskey({ navigate, setAccount, account, className
           </div>
         )}
 
-        <div className="mt-auto">
+        <div className="mt-auto flex flex-col gap-4">
+          {/* Passkey name input */}
+          <div>
+            <label htmlFor="passkey-name" className="block text-sm font-bold text-[#111] mb-2">
+              Name your passkey
+            </label>
+            <input
+              id="passkey-name"
+              type="text"
+              value={passkeyName}
+              onChange={(e) => setPasskeyName(e.target.value)}
+              placeholder='e.g. "My MacBook", "Work iPhone"'
+              className="w-full h-12 px-4 bg-white border-2 border-[#111] rounded-[13px] text-base font-semibold text-[#111] placeholder:text-gray-400 shadow-neo-sm focus:outline-none focus:ring-2 focus:ring-[#EF7B28] focus:ring-offset-1"
+              disabled={loading}
+            />
+          </div>
+
           <button
             onClick={handleCreate}
-            disabled={loading}
+            disabled={loading || passkeyName.trim().length === 0}
             className="w-full h-14 bg-[#EF7B28] text-white border-2 border-[#111] rounded-[13px] text-base font-extrabold shadow-neo shadow-neo-active disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2"
           >
             {loading ? (

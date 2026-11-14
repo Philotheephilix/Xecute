@@ -11,23 +11,17 @@ interface Props {
 const REQUIRE_INVITE =
   (import.meta as ImportMeta & { env: Record<string, string> }).env['VITE_REQUIRE_INVITE'] === 'true';
 
-export default function Welcome({ navigate, setAccount, className }: Props) {
+export default function Welcome({ navigate, className }: Props) {
   const [signInError, setSignInError] = useState<string | null>(null);
 
   const handleSignIn = () => {
     const accountId = localStorage.getItem('floors:account_id');
-    const credentialId = localStorage.getItem('floors:credential_id');
-    const publicKey = localStorage.getItem('floors:public_key');
-
-    if (!accountId || !credentialId || !publicKey) {
+    if (!accountId) {
       setSignInError('No existing account found.');
       return;
     }
-
-    const compressedKeyHex = localStorage.getItem('floors:compressed_key') ?? '';
     setSignInError(null);
-    setAccount({ accountId, credentialId, publicKey, compressedKeyHex });
-    navigate('portfolio');
+    navigate('sign-in');
   };
   return (
     <div className={className}>

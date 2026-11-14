@@ -72,8 +72,7 @@ test(
     // ── Step 1: Welcome screen ────────────────────────────────────────────────
     await page.goto('/');
     await page.waitForLoadState('load');
-    await expect(page.locator('h1').filter({ hasText: 'Floors' })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Get Started' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Get Started' })).toBeVisible({ timeout: 10_000 });
 
     // ── Step 2: Navigate to Create Passkey screen ─────────────────────────────
     await page.getByRole('button', { name: 'Get Started' }).click();
@@ -93,10 +92,10 @@ test(
     // The app navigates to creating-account and polls GET /v1/accounts/:id
     await expect(page.getByText('Setting up your account')).toBeVisible({ timeout: 10_000 });
 
-    // ── Step 6: Wait for Account Ready screen (polls up to 30s) ──────────────
+    // ── Step 6: Wait for Wallet Created screen (polls up to 30s) ──────────────
     // CreatingAccount.tsx polls GET /v1/accounts/:id every 500ms up to 30s.
     // The real API must confirm account creation before we proceed.
-    await expect(page.getByText('Account Ready!')).toBeVisible({ timeout: 35_000 });
+    await expect(page.getByText('Wallet Created')).toBeVisible({ timeout: 35_000 });
 
     // Capture account_id from the WALLET ADDRESS card (starts with "0s")
     const walletAddressCard = page.locator('text=WALLET ADDRESS').locator('..').locator('p').nth(1);
@@ -111,11 +110,10 @@ test(
       console.log(`[onboarding] POST /v1/accounts → ${createAccountCall.status}: ${createAccountCall.body.slice(0, 120)}`);
     }
 
-    // ── Step 7: Click "Enable Trading" on AccountReady ───────────────────────
-    // AccountReady now navigates to setup-defaults first (screen order changed:
+    // ── Step 7: Click "Set Up Trading" on AccountReady ───────────────────────
+    // AccountReady navigates to setup-defaults first (screen order:
     //   account-ready → setup-defaults → enable-trading → fund).
-    // After this click we are on setup-defaults, NOT yet on enable-trading.
-    await page.getByRole('button', { name: 'Enable Trading' }).click();
+    await page.getByRole('button', { name: 'Set Up Trading' }).click();
 
     // ── Step 7b: Navigate forward through intermediate screens ───────────────
     // Handle in order: setup-defaults → enable-trading → fund
@@ -182,9 +180,9 @@ test('welcome screen renders correctly', async ({ page }) => {
 test('back navigation from create-passkey returns to welcome', async ({ page }) => {
   await page.goto('/');
   await page.waitForLoadState('load');
-  await expect(page.locator('h1').filter({ hasText: 'Floors' })).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByRole('button', { name: 'Get Started' })).toBeVisible({ timeout: 10_000 });
   await page.getByRole('button', { name: 'Get Started' }).click();
-  await expect(page.getByText('Secure Your Account')).toBeVisible({ timeout: 5_000 });
+  await expect(page.getByText('Create Your Passkey')).toBeVisible({ timeout: 5_000 });
   await page.click('[aria-label="Go back"]');
   await expect(page.getByRole('button', { name: 'Get Started' })).toBeVisible({ timeout: 5_000 });
 });

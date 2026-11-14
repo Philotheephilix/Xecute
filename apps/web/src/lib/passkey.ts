@@ -59,6 +59,68 @@ export function extractCompressedP256Key(subjectPublicKeyInfo: Uint8Array): Uint
   return compressed;
 }
 
+// ── DER to raw P-256 signature ──────────────────────────────────────────────
+
+// P-256 curve order N
+const P256_N = BigInt('0xFFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551');
+const P256_HALF_N = P256_N / 2n;
+
+function bytesToBigInt(bytes: Uint8Array): bigint {
+  let n = 0n;
+  for (const b of bytes) n = (n << 8n) | BigInt(b);
+  return n;
+}
+
+function bigIntToBytes32(n: bigint): Uint8Array {
+  const out = new Uint8Array(32);
+  let v = n;
+  for (let i = 31; i >= 0; i--) {
+    out[i] = Number(v & 0xffn);
+    v >>= 8n;
+  }
+  return out;
+}
+
+/**
+ * Convert a DER-encoded ECDSA signature (from WebAuthn) to raw 64-byte (r || s).
+ * NEAR wallet contract expects 64-byte raw format with low-S normalization.
+ */
+export function derToRaw(der: Uint8Array): Uint8Array {
+  if (der[0] !== 0x30) throw new Error('Not a DER sequence');
+  let offset = 2;
+  if (der[1]! > 0x80) offset += der[1]! - 0x80;
+
+  if (der[offset] !== 0x02) throw new Error('Expected INTEGER tag for r');
+  offset++;
+  const rLen = der[offset]!;
+  offset++;
+  let r = der.slice(offset, offset + rLen);
+  offset += rLen;
+
+  if (der[offset] !== 0x02) throw new Error('Expected INTEGER tag for s');
+  offset++;
+  const sLen = der[offset]!;
+  offset++;
+  let s = der.slice(offset, offset + sLen);
+
+  // Strip leading zero padding
+  if (r.length === 33 && r[0] === 0x00) r = r.slice(1);
+  if (s.length === 33 && s[0] === 0x00) s = s.slice(1);
+
+  // Pad to 32 bytes each
+  const raw = new Uint8Array(64);
+  raw.set(r, 32 - r.length);
+
+  // Low-S normalization: if s > N/2, replace with N - s
+  let sVal = bytesToBigInt(s);
+  if (sVal > P256_HALF_N) {
+    sVal = P256_N - sVal;
+  }
+  raw.set(bigIntToBytes32(sVal), 32);
+
+  return raw;
+}
+
 // ── Base58 encoding ──────────────────────────────────────────────────────────
 
 const BASE58_ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
@@ -131,7 +193,8 @@ export interface PasskeyAssertion {
 
 // ── Create passkey ───────────────────────────────────────────────────────────
 
-export async function createPasskey(): Promise<PasskeyCreationResult> {
+export async function createPasskey(name?: string): Promise<PasskeyCreationResult> {
+  const displayName = name?.trim() || 'Floors User';
   const credential = await navigator.credentials.create({
     publicKey: {
       rp: {
@@ -140,13 +203,12 @@ export async function createPasskey(): Promise<PasskeyCreationResult> {
       },
       user: {
         id: crypto.getRandomValues(new Uint8Array(16)),
-        name: 'user',
-        displayName: 'User',
+        name: displayName,
+        displayName,
       },
       challenge: crypto.getRandomValues(new Uint8Array(32)),
       pubKeyCredParams: [
-        { alg: -7, type: 'public-key' as const },   // ES256
-        { alg: -8, type: 'public-key' as const },   // EdDSA
+        { alg: -7, type: 'public-key' as const },   // ES256 / P-256
       ],
       authenticatorSelection: {
         residentKey: 'required' as const,
@@ -185,20 +247,23 @@ export async function signWithPasskey(
   credentialId: string,
 ): Promise<PasskeyAssertion> {
   // Decode base64url credential ID back to ArrayBuffer
-  const rawId = Uint8Array.from(
-    atob(credentialId.replace(/-/g, '+').replace(/_/g, '/')),
-    (c) => c.charCodeAt(0),
-  );
+  const allowCredentials =
+    credentialId !== undefined && credentialId !== ''
+      ? [
+          {
+            id: Uint8Array.from(
+              atob(credentialId.replace(/-/g, '+').replace(/_/g, '/')),
+              (c) => c.charCodeAt(0),
+            ),
+            type: 'public-key' as const,
+          },
+        ]
+      : [];
 
   const assertion = await navigator.credentials.get({
     publicKey: {
       challenge,
-      allowCredentials: [
-        {
-          id: rawId,
-          type: 'public-key' as const,
-        },
-      ],
+      allowCredentials,
       userVerification: 'required' as const,
       timeout: 60000,
     },

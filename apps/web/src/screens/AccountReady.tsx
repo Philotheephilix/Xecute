@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import type { Screen, AccountState } from '../App';
 
 interface Props {
@@ -13,12 +14,38 @@ function truncateAddress(addr: string): string {
 }
 
 export default function AccountReady({ navigate, account, className }: Props) {
-  const accountId = account?.accountId ?? '0sabc123def456';
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    if (!account) navigate('welcome');
+  }, [account, navigate]);
+
+  if (!account) return null;
+
+  const accountId = account.accountId;
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(accountId);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // Fallback for older browsers
+      const el = document.createElement('textarea');
+      el.value = accountId;
+      document.body.appendChild(el);
+      el.select();
+      document.execCommand('copy');
+      document.body.removeChild(el);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    }
+  };
 
   return (
     <div className={className}>
       {/* Hero orange gradient header */}
-      <div className="relative w-full bg-gradient-to-b from-[#ED7725] to-[#F28530] border-b-2 border-[#111] rounded-b-[28px] pt-14 px-6 pb-8 shadow-neo-lg overflow-hidden">
+      <div className="relative w-full bg-[#EF7B28] border-b-2 border-[#111] rounded-b-[28px] pt-14 px-6 pb-8 shadow-neo-lg overflow-hidden">
         {/* Cloud SVG watermark */}
         <svg
           className="absolute right-[-10px] bottom-[-20px] w-48 h-48 opacity-15 pointer-events-none"
@@ -38,7 +65,7 @@ export default function AccountReady({ navigate, account, className }: Props) {
           <div className="w-20 h-20 bg-white border-2 border-[#111] rounded-full shadow-neo flex items-center justify-center">
             <svg
               className="w-10 h-10 stroke-current fill-none stroke-[2.5]"
-              style={{ color: '#44C760' }}
+              style={{ color: '#29CEB4' }}
               viewBox="0 0 24 24"
             >
               <polyline points="20 6 9 17 4 12" />
@@ -46,9 +73,9 @@ export default function AccountReady({ navigate, account, className }: Props) {
           </div>
         </div>
 
-        <h1 className="text-3xl font-extrabold text-[#111] text-center">Account Ready!</h1>
-        <p className="text-base font-semibold text-[#2A1608] text-center mt-2">
-          Your NEAR wallet is live and secured.
+        <h1 className="text-3xl font-extrabold text-[#111] text-center">Wallet Created</h1>
+        <p className="text-base font-semibold text-[#111111] text-center mt-2">
+          Protected by your device passkey.
         </p>
       </div>
 
@@ -56,20 +83,40 @@ export default function AccountReady({ navigate, account, className }: Props) {
         {/* Account ID card */}
         <div className="bg-white border-2 border-[#111] rounded-[18px] shadow-neo-sm p-4">
           <p className="text-xs font-extrabold text-gray-500 mb-1">WALLET ADDRESS</p>
-          <p className="font-mono text-base font-bold text-[#111] break-all">
-            {truncateAddress(accountId)}
-          </p>
+          <div className="flex items-center gap-2">
+            <p className="font-mono text-base font-bold text-[#111] break-all flex-1">
+              {truncateAddress(accountId)}
+            </p>
+            <button
+              onClick={handleCopy}
+              className="shrink-0 w-8 h-8 bg-white border-2 border-[#111] rounded-[8px] flex items-center justify-center hover:bg-gray-50 active:translate-y-[1px] transition-all"
+              aria-label="Copy address"
+            >
+              {copied ? (
+                <svg className="w-4 h-4 text-[#29CEB4]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
+              ) : (
+                <svg className="w-4 h-4 text-[#111]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                </svg>
+              )}
+            </button>
+          </div>
+          {copied && (
+            <p className="text-xs font-bold text-[#29CEB4] mt-1">Copied!</p>
+          )}
         </div>
 
         {/* Features list */}
         <div className="flex flex-col gap-3">
           {[
             'Secured by your device passkey',
-            'Instant NEAR transactions',
             'Buy crypto directly from X posts',
           ].map((feat) => (
             <div key={feat} className="flex items-center gap-3">
-              <div className="w-5 h-5 shrink-0 rounded-full bg-[#44C760] border-2 border-[#111] flex items-center justify-center">
+              <div className="w-5 h-5 shrink-0 rounded-full bg-[#29CEB4] border-2 border-[#111] flex items-center justify-center">
                 <svg className="w-2.5 h-2.5 stroke-current fill-none stroke-[3]" viewBox="0 0 24 24">
                   <polyline points="20 6 9 17 4 12" />
                 </svg>
@@ -79,12 +126,12 @@ export default function AccountReady({ navigate, account, className }: Props) {
           ))}
         </div>
 
-        {/* Enable Trading → Fund button */}
+        {/* Setup Defaults → Enable Trading → Fund button */}
         <button
-          onClick={() => navigate('enable-trading')}
+          onClick={() => navigate('setup-defaults')}
           className="w-full h-14 bg-[#9662FF] text-white border-2 border-[#111] rounded-[13px] text-base font-extrabold shadow-neo shadow-neo-active"
         >
-          Enable Trading
+          Set Up Trading
         </button>
 
         {/* Skip to fund */}

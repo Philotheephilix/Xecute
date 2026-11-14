@@ -1,8 +1,6 @@
 import { useState } from 'react';
 import type { Screen, AccountState } from '../App';
-import { signWithPasskey } from '../lib/passkey';
-import { getEnableTradingRequest, enableTrading } from '../api/client';
-import { toHex } from '../lib/passkey';
+import { enableTrading } from '../api/client';
 
 interface Props {
   navigate: (to: Screen) => void;
@@ -11,70 +9,33 @@ interface Props {
   className: string;
 }
 
-type Phase = 'idle' | 'requesting' | 'signing' | 'submitting' | 'done' | 'error';
+type Phase = 'idle' | 'submitting' | 'skipping' | 'done' | 'error';
 
 export default function EnableTrading({ navigate, account, className }: Props) {
   const [phase, setPhase] = useState<Phase>('idle');
   const [error, setError] = useState<string | null>(null);
 
   const accountId = account?.accountId;
-  const credentialId = account?.credentialId;
+  const publicKey = account?.compressedKeyHex;
 
   const handleEnable = async () => {
-    if (!accountId || !credentialId) {
+    if (!accountId || !publicKey) {
       setError('Account not found — please restart onboarding');
       setPhase('error');
       return;
     }
 
     setError(null);
-    setPhase('requesting');
+    setPhase('submitting');
 
     try {
-      // Step 1: ask API for a wallet_request to sign
-      const requestResult = await getEnableTradingRequest(accountId);
-
-      if (requestResult === null) {
-        // Endpoint not implemented yet — skip directly to Fund
-        console.warn('[floors] enable-trading-request not available, skipping step');
-        navigate('fund');
-        return;
-      }
-
-      const { wallet_request, challenge } = requestResult;
-
-      // Step 2: sign challenge with passkey
-      setPhase('signing');
-      // Use the challenge bytes returned by the API — avoids JSON key-order dependency
-      function hexToBytes(hex: string): Uint8Array {
-        const bytes = new Uint8Array(hex.length / 2);
-        for (let i = 0; i < bytes.length; i++) {
-          bytes[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
-        }
-        return bytes;
-      }
-      const challengeBytes = hexToBytes(challenge);
-
-      const assertion = await signWithPasskey(challengeBytes, credentialId);
-
-      // Step 3: submit signed assertion to relayer
-      setPhase('submitting');
-      const signatureHex = toHex(assertion.signature);
-
-      await enableTrading(accountId, {
-        signature: signatureHex,
-        credential_id: credentialId,
-        wallet_request,
-      });
-
+      await enableTrading(accountId, publicKey);
       setPhase('done');
-
-      // Brief pause so user can see the success state, then navigate
       await new Promise<void>((r) => setTimeout(r, 600));
       navigate('fund');
     } catch (err) {
       console.error('[floors] enable-trading error:', err);
-      setError(err instanceof Error ? err.message : 'Enable trading failed');
+      setError(err instanceof Error ? err.message : 'Registration failed');
       setPhase('error');
     }
   };
@@ -83,13 +44,12 @@ export default function EnableTrading({ navigate, account, className }: Props) {
     navigate('fund');
   };
 
-  const isLoading = phase === 'requesting' || phase === 'signing' || phase === 'submitting';
+  const isLoading = phase === 'submitting' || phase === 'skipping';
 
   const phaseLabel: Record<Phase, string> = {
-    idle: 'Enable Trading (one tap)',
-    requesting: 'Preparing…',
-    signing: 'Waiting for fingerprint…',
+    idle: 'Enable Trading',
     submitting: 'Registering on NEAR…',
+    skipping: 'Setup not available, continuing…',
     done: 'Trading enabled!',
     error: 'Try again',
   };
@@ -100,7 +60,7 @@ export default function EnableTrading({ navigate, account, className }: Props) {
         {/* Header */}
         <div className="flex items-center gap-4 mb-8">
           <button
-            onClick={() => navigate('account-ready')}
+            onClick={() => navigate('setup-defaults')}
             className="w-11 h-11 bg-white border-2 border-[#111] rounded-[13px] shadow-neo-sm shadow-neo-active flex items-center justify-center"
             aria-label="Go back"
           >
@@ -114,10 +74,10 @@ export default function EnableTrading({ navigate, account, className }: Props) {
 
         {/* Title */}
         <h1 className="text-3xl font-extrabold text-[#111] leading-tight mb-3">
-          One tap to start trading
+          Register with NEAR Intents
         </h1>
         <p className="text-base font-semibold text-gray-600 leading-relaxed mb-10">
-          One fingerprint registers your key on NEAR Intents — the protocol that powers instant swaps.
+          One tap registers your key with NEAR Intents.
         </p>
 
         {/* Illustration */}
@@ -146,7 +106,6 @@ export default function EnableTrading({ navigate, account, className }: Props) {
           {[
             'Registers your passkey with NEAR Intents',
             'Required to buy and sell crypto',
-            'One-time fingerprint — never repeated',
           ].map((feat) => (
             <div key={feat} className="flex items-start gap-3">
               <div className="w-5 h-5 shrink-0 mt-0.5 rounded-full bg-[#9662FF] border-2 border-[#111] flex items-center justify-center">
@@ -158,6 +117,14 @@ export default function EnableTrading({ navigate, account, className }: Props) {
             </div>
           ))}
         </div>
+
+        {/* H8: Skipping notice — shown briefly when endpoint is unavailable */}
+        {phase === 'skipping' && (
+          <div className="mb-6 p-4 bg-white border-2 border-[#111] rounded-[18px] shadow-neo-sm flex items-center gap-3">
+            <span className="w-5 h-5 border-2 border-[#111] border-t-transparent rounded-full animate-spin shrink-0" />
+            <p className="text-sm font-bold text-[#111]">Setup not available, continuing…</p>
+          </div>
+        )}
 
         {/* Error card */}
         {error !== null && (

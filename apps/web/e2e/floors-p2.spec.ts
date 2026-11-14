@@ -446,7 +446,7 @@ test.describe('full-buy-flow: web app shows floor quote in extension sheet', () 
       // Navigate to web app
       await page.goto('/');
       await page.waitForLoadState('load');
-      await expect(page.locator('h1').filter({ hasText: 'Floors' })).toBeVisible({ timeout: 10_000 });
+      await expect(page.getByRole('button', { name: 'Get Started' })).toBeVisible({ timeout: 10_000 });
 
       // Set up virtual WebAuthn BEFORE clicking Get Started
       await setupVirtualAuthenticator(page);
@@ -487,7 +487,7 @@ test.describe('full-buy-flow: web app shows floor quote in extension sheet', () 
       await expect(page.getByText('Setting up your account')).toBeVisible({ timeout: 10_000 });
 
       // DB is up — wait for Account Ready
-      await expect(page.getByText('Account Ready!')).toBeVisible({ timeout: 35_000 });
+      await expect(page.getByText('Wallet Created')).toBeVisible({ timeout: 35_000 });
 
       // Check that POST /v1/accounts was called successfully
       const createCall = apiResponses.find((r) => r.url.includes('/v1/accounts') && r.status >= 200 && r.status < 300);

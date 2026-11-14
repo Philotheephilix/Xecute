@@ -17,19 +17,26 @@ interface ToastState {
 }
 
 const CHAIN_COLORS: Record<string, string> = {
-  NEAR: '#29CEB4',
+  NEAR: '#111111',
   Ethereum: '#9662FF',
-  Base: '#0052FF',
-  Arbitrum: '#28A0F0',
-  Solana: '#9945FF',
+  Base: '#9662FF',
+  Arbitrum: '#29CEB4',
+  Solana: '#EF7B28',
 };
 
 export default function Fund({ navigate, account, className }: Props) {
-  const accountId = account?.accountId ?? '0sabc123def456';
+  useEffect(() => {
+    if (!account) navigate('welcome');
+  }, [account, navigate]);
+
+  if (!account) return null;
+
+  const accountId = account.accountId;
   const [toast, setToast] = useState<ToastState>({ visible: false, exiting: false, message: '' });
   const [depositAddresses, setDepositAddresses] = useState<DepositAddress[]>([]);
   const [selectedChain, setSelectedChain] = useState<string>('NEAR');
   const [loadingAddresses, setLoadingAddresses] = useState(true);
+  const [addressError, setAddressError] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -44,6 +51,7 @@ export default function Fund({ navigate, account, className }: Props) {
         }
       } catch (err) {
         console.warn('[floors] Failed to load deposit addresses:', err);
+        if (!cancelled) setAddressError(true);
       } finally {
         if (!cancelled) setLoadingAddresses(false);
       }
@@ -84,7 +92,7 @@ export default function Fund({ navigate, account, className }: Props) {
             toast.exiting ? 'toast-exit' : 'toast-enter'
           }`}
         >
-          <div className="w-9 h-9 rounded-xl bg-[#EF7B28] border border-[#111] shadow-neo-sm flex items-center justify-center text-white">
+          <div className="w-9 h-9 rounded-xl bg-[#EF7B28] border-2 border-[#111] shadow-neo-sm flex items-center justify-center text-white">
             <svg className="w-5 h-5 fill-current" viewBox="0 0 24 24">
               <path d="M12 0L14.59 9.41L24 12L14.59 14.59L12 24L9.41 14.59L0 12L9.41 9.41L12 0Z" />
             </svg>
@@ -98,7 +106,7 @@ export default function Fund({ navigate, account, className }: Props) {
       {/* Header */}
       <div className="flex items-center gap-4 px-6 pt-8 pb-4">
         <button
-          onClick={() => navigate('account-ready')}
+          onClick={() => navigate('enable-trading')}
           className="w-11 h-11 bg-white border-2 border-[#111] rounded-[13px] shadow-neo-sm shadow-neo-active flex items-center justify-center"
           aria-label="Go back"
         >
@@ -111,6 +119,13 @@ export default function Fund({ navigate, account, className }: Props) {
       </div>
 
       <div className="flex flex-col px-6 gap-5 pb-8">
+        {/* Address fetch error */}
+        {addressError && (
+          <p className="text-xs font-semibold text-[#EF7B28]">
+            Could not load deposit addresses. Using NEAR address as fallback.
+          </p>
+        )}
+
         {/* Chain selector */}
         {!loadingAddresses && depositAddresses.length > 0 && (
           <div>
