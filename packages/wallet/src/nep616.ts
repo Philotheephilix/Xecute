@@ -18,7 +18,7 @@ import { keccak_256 } from '@noble/hashes/sha3';
  *       (NEP-591) before accounts can be created with this hash.
  */
 export const WALLET_CONTRACT_CODE_HASH_HEX =
-  '7c2023ca3e3c53bf2309f9654180c8c516fb36cce5a18da8577e83c8f63ffd6b';
+  '13b8df45a372cad6e62cf83e0106339330aff2bc6bcbb65d49e7ef7a2882c503';
 
 /**
  * Default nonce timeout in seconds (u32) — 1 hour, matching wallet contract default.

@@ -2,9 +2,12 @@ import { describe, it, expect } from 'vitest';
 import {
   buildWalletRequest,
   hashWalletRequest,
+  hashRequestMessage,
+  buildRequestMessage,
   validateWalletRequest,
   ALLOWED_RECEIVERS,
   type ExternalCall,
+  type RequestMessage,
 } from './index.js';
 
 // ---------------------------------------------------------------------------
@@ -98,7 +101,122 @@ describe('hashWalletRequest', () => {
 });
 
 // ---------------------------------------------------------------------------
-// validateWalletRequest
+// hashRequestMessage — contract format (verified against Rust test vectors)
+// ---------------------------------------------------------------------------
+describe('hashRequestMessage', () => {
+  function toHex(bytes: Uint8Array): string {
+    return Array.from(bytes)
+      .map((b) => b.toString(16).padStart(2, '0'))
+      .join('');
+  }
+
+  it('matches Rust test vector 1: empty request, UNIX_EPOCH', () => {
+    const msg: RequestMessage = {
+      pay_for_gas: false,
+      chain_id: 'mainnet',
+      signer_id: '0s0000000000000000000000000000000000000000',
+      nonce: 0,
+      created_at: '1970-01-01T00:00:00Z',
+      timeout_secs: 3600,
+      request: {},
+    };
+    const hash = hashRequestMessage(msg);
+    expect(toHex(hash)).toBe('a8df85c0e8793716904fd57e9bef7d83b12773508bd3c9fca554afbfb108d4b5');
+  });
+
+  it('matches Rust test vector 2: v1.signer function_call', () => {
+    const msg: RequestMessage = {
+      chain_id: 'mainnet',
+      signer_id: '0se5eba21e8f191e1880e453794bc551dfa50a3419',
+      nonce: 2845491008,
+      created_at: '2026-07-07T11:13:29Z',
+      timeout_secs: 3600,
+      request: {
+        external: [{
+          receiver_id: 'v1.signer',
+          actions: [{
+            action: 'function_call',
+            payload: {
+              function_name: 'sign',
+              args: 'eyJyZXF1ZXN0Ijp7InBheWxvYWRfdjIiOnsiRWNkc2EiOiIwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwIn0sImRvbWFpbl9pZCI6MCwicGF0aCI6IiJ9fQ==',
+              deposit: '1',
+            },
+          }],
+        }],
+      },
+    };
+    const hash = hashRequestMessage(msg);
+    expect(toHex(hash)).toBe('7c8560b51380551676a54dac49dcc1e009af3020556cde8e1e2172782ffd6775');
+  });
+
+  it('returns 32 bytes', () => {
+    const msg: RequestMessage = {
+      chain_id: 'testnet',
+      signer_id: '0s0000000000000000000000000000000000000000',
+      nonce: 42,
+      created_at: '2026-01-01T00:00:00Z',
+      timeout_secs: 3600,
+      request: {},
+    };
+    const hash = hashRequestMessage(msg);
+    expect(hash).toHaveLength(32);
+    expect(hash).toBeInstanceOf(Uint8Array);
+  });
+
+  it('deterministic for same input', () => {
+    const msg: RequestMessage = {
+      chain_id: 'testnet',
+      signer_id: '0s0000000000000000000000000000000000000000',
+      nonce: 1,
+      created_at: '2026-01-01T00:00:00Z',
+      timeout_secs: 3600,
+      request: {},
+    };
+    const h1 = hashRequestMessage(msg);
+    const h2 = hashRequestMessage(msg);
+    expect(h1).toEqual(h2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildRequestMessage
+// ---------------------------------------------------------------------------
+describe('buildRequestMessage', () => {
+  it('creates a valid RequestMessage', () => {
+    const msg = buildRequestMessage('testnet', '0s1234567890abcdef1234567890abcdef12345678', [{
+      receiver_id: 'intents.near',
+      actions: [{
+        action: 'function_call',
+        payload: {
+          function_name: 'add_public_key',
+          args: btoa('{"public_key":"test"}'),
+          deposit: '0',
+        },
+      }],
+    }]);
+
+    expect(msg.chain_id).toBe('testnet');
+    expect(msg.signer_id).toBe('0s1234567890abcdef1234567890abcdef12345678');
+    expect(typeof msg.nonce).toBe('number');
+    expect(msg.nonce).toBeGreaterThanOrEqual(0);
+    expect(msg.nonce).toBeLessThanOrEqual(0xFFFFFFFF);
+    expect(msg.timeout_secs).toBe(3600);
+    expect(msg.request.external).toHaveLength(1);
+    expect(msg.created_at).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
+  });
+
+  it('created_at is in the past (60s lag)', () => {
+    const msg = buildRequestMessage('testnet', '0s0000000000000000000000000000000000000000', []);
+    const createdAtMs = new Date(msg.created_at).getTime();
+    const nowMs = Date.now();
+    // Should be roughly 60s in the past (allow 5s tolerance)
+    expect(nowMs - createdAtMs).toBeGreaterThan(55_000);
+    expect(nowMs - createdAtMs).toBeLessThan(65_000);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// validateWalletRequest (legacy)
 // ---------------------------------------------------------------------------
 describe('validateWalletRequest', () => {
   function futureNs(): string {
