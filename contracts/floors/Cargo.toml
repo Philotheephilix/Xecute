@@ -8,18 +8,21 @@ crate-type = ["cdylib", "rlib"]
 
 # When compiling for wasm (on-chain), use near-sdk without extra features.
 [target.'cfg(target_family = "wasm")'.dependencies]
-near-sdk = "5.11.0"
+near-sdk = "=5.24.1"
 serde = { version = "1.0.219", features = ["derive"] }
 serde_json = "1.0.140"
+floors-types = { path = "../floors-types" }
 
-# When compiling for the host (tests, checks, IDE), enable non-contract-usage.
+# When compiling for the host (tests, checks, IDE).
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
-near-sdk = { version = "5.11.0", features = ["non-contract-usage"] }
+near-sdk = { version = "=5.24.1", features = ["unit-testing"] }
 serde = { version = "1.0.219", features = ["derive"] }
 serde_json = "1.0.140"
+floors-types = { path = "../floors-types" }
 
 [dev-dependencies]
-near-sdk = { version = "5.11.0", features = ["unit-testing"] }
+near-sdk = { version = "=5.24.1", features = ["unit-testing"] }
+ed25519-dalek = "2"
 
 [profile.release]
 codegen-units = 1
