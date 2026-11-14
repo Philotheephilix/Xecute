@@ -10,8 +10,6 @@ import { browser } from 'wxt/browser';
 import { z } from 'zod';
 import { MessageSchema } from '../content/messages.js';
 
-const API_URL = 'http://localhost:3001';
-
 export default defineBackground(() => {
 
   // ── Registry types ──────────────────────────────────────────────────────
@@ -88,52 +86,6 @@ export default defineBackground(() => {
     });
   }
 
-  // ── API call ──────────────────────────────────────────────────────────────
-  interface BuyApiResponse {
-    request_id: string;
-    tx_hash: string;
-    status: string;
-  }
-
-  async function postBuy(
-    ticker: string,
-    amount: string,
-    signature: string,
-    credentialId: string,
-    floorProtection: boolean,
-    quoteId: string,
-    idempotencyKey: string,
-  ): Promise<BuyApiResponse> {
-    const amountUsdc = Math.round(parseFloat(amount) * 1_000_000).toString();
-
-    const signedIntent = {
-      ticker,
-      amount_usdc: amountUsdc,
-      floor_protection: floorProtection,
-      signature,
-      credential_id: credentialId,
-    };
-
-    const res = await fetch(`${API_URL}/v1/buy`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Idempotency-Key': idempotencyKey,
-      },
-      body: JSON.stringify({
-        signed_intent: signedIntent,
-        quote_id: quoteId,
-      }),
-    });
-
-    if (!res.ok) {
-      const body = await res.text().catch(() => '');
-      throw new Error(`API /v1/buy returned ${res.status.toString()}: ${body}`);
-    }
-
-    return res.json() as Promise<BuyApiResponse>;
-  }
-
   // ── Extended SHEET_SIGNED schema (includes extra fields from sheet) ───────
   const SheetSignedExtendedSchema = z.object({
     type: z.literal('SHEET_SIGNED'),
@@ -149,9 +101,18 @@ export default defineBackground(() => {
   // ── Message handler ──────────────────────────────────────────────────────
   type MessageResponse =
     | { status: 'ok' }
-    | { status: 'ok'; request_id: string; tx_hash: string }
     | { registry: Registry }
     | { error: string };
+
+  /** Keys the bridge syncs from web-app localStorage */
+  const STORAGE_KEYS = [
+    'floors:account_id',
+    'floors:credential_id',
+    'floors:public_key',
+    'floors:compressed_key',
+    'floors:floor_defaults',
+    'floors:passkeys',
+  ] as const;
 
   browser.runtime.onMessage.addListener(
     (
@@ -194,8 +155,26 @@ export default defineBackground(() => {
           return true;
         }
 
+        case 'SYNC_STORAGE': {
+          // Write web-app localStorage keys into chrome.storage.local so the
+          // sheet popup (running on chrome-extension:// origin) can read them.
+          const allowed = new Set<string>(STORAGE_KEYS);
+          const safe: Record<string, string> = {};
+          for (const [k, v] of Object.entries(message.payload)) {
+            if (allowed.has(k)) safe[k] = v;
+          }
+          browser.storage.local.set(safe)
+            .then(() => sendResponse({ status: 'ok' }))
+            .catch((err: unknown) => {
+              const msg = err instanceof Error ? err.message : String(err);
+              sendResponse({ error: msg });
+            });
+          return true;
+        }
+
         case 'SHEET_SIGNED': {
-          // Parse the extended message (quoteId, amount, credentialId, floorProtection)
+          // Sheet already submits to /v1/submit directly and tracks via SSE.
+          // Background only updates local state — no API resubmit (prevents double-submit).
           const extended = SheetSignedExtendedSchema.safeParse(rawMessage);
           if (!extended.success) {
             console.error('[floors] SHEET_SIGNED missing required fields:', extended.error);
@@ -203,27 +182,11 @@ export default defineBackground(() => {
             return false;
           }
 
-          const { ticker, amount, signature, credentialId, floorProtection, quoteId } = extended.data;
-          const idempotencyKey = crypto.randomUUID();
+          const { ticker, quoteId } = extended.data;
+          console.info('[floors] Buy confirmed by sheet (submitted via /v1/submit):', { ticker, quoteId });
 
-          console.info('[floors] Posting buy to API:', { ticker, quoteId });
-
-          postBuy(ticker, amount, signature, credentialId, floorProtection, quoteId, idempotencyKey)
-            .then((apiResponse) => {
-              console.info('[floors] Buy submitted:', apiResponse);
-              sendResponse({
-                status: 'ok',
-                request_id: apiResponse.request_id,
-                tx_hash: apiResponse.tx_hash,
-              });
-            })
-            .catch((err: unknown) => {
-              const msg = err instanceof Error ? err.message : String(err);
-              console.error('[floors] Buy API error:', msg);
-              sendResponse({ error: msg });
-            });
-
-          return true;
+          sendResponse({ status: 'ok' });
+          return false;
         }
 
         default: {

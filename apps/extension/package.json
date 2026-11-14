@@ -7,12 +7,13 @@
     "dev": "wxt",
     "build": "wxt build",
     "test": "vitest run",
-    "e2e": "playwright test"
+    "e2e": "PW_DISABLE_TS_ESM=1 playwright test"
   },
   "dependencies": {
     "wxt": "0.20.6",
     "preact": "10.26.9",
-    "zod": "3.25.67"
+    "zod": "3.25.67",
+    "@floors/intents": "workspace:*"
   },
   "devDependencies": {
     "vitest": "3.2.4",

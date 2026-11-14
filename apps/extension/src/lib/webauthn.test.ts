@@ -150,7 +150,7 @@ describe('signWithPasskey', () => {
     vi.restoreAllMocks();
   });
 
-  it('returns 64-byte r‖s signature from DER response', async () => {
+  it('returns 64-byte r‖s signature and original DER from DER response', async () => {
     const r = new Uint8Array(32).fill(0xde);
     const s = new Uint8Array(32).fill(0xad);
     const der = buildDer(r, s);
@@ -165,9 +165,11 @@ describe('signWithPasskey', () => {
     expect(result.signature.slice(0, 32)).toEqual(r);
     expect(result.signature.slice(32, 64)).toEqual(s);
     expect(result.credentialId).toBe('cred-abc');
+    // signatureDer should preserve the original DER bytes
+    expect(result.signatureDer).toEqual(der);
   });
 
-  it('passes through 64-byte raw signature unchanged', async () => {
+  it('passes through 64-byte raw signature unchanged and preserves DER', async () => {
     // Mock already returns a 64-byte raw signature (as in some test setups)
     const raw64 = new Uint8Array(64);
     for (let i = 0; i < 64; i++) raw64[i] = i;
@@ -179,6 +181,8 @@ describe('signWithPasskey', () => {
 
     expect(result.signature.length).toBe(64);
     expect(result.signature).toEqual(raw64);
+    // signatureDer preserves original bytes even when they're raw
+    expect(result.signatureDer).toEqual(raw64);
   });
 
   it('passes the challenge to navigator.credentials.get', async () => {
@@ -215,6 +219,35 @@ describe('signWithPasskey', () => {
 
     const callArg = getSpy.mock.calls[0]?.[0] as CredentialRequestOptions;
     expect(callArg.publicKey?.allowCredentials).toHaveLength(1);
+  });
+
+  it('accepts base64url credential IDs (with - and _ chars)', async () => {
+    const r = new Uint8Array(32).fill(0x11);
+    const s = new Uint8Array(32).fill(0x22);
+    const der = buildDer(r, s);
+    const credential = buildMockCredential(der, 'b64url-cred');
+
+    const getSpy = vi
+      .spyOn(navigator.credentials, 'get')
+      .mockResolvedValue(credential);
+
+    // Build a base64url credential ID the same way createPasskeyInline does:
+    // btoa → replace + with -, / with _, strip =
+    const rawBytes = new Uint8Array([0xff, 0xfe, 0xfd, 0xfc, 0xfb, 0xfa]);
+    const credId = btoa(String.fromCharCode(...rawBytes))
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=/g, '');
+
+    // This would throw "The string to be decoded is not correctly encoded"
+    // before the fix, because atob() does not accept base64url characters
+    await signWithPasskey(new Uint8Array([1]), credId);
+
+    const callArg = getSpy.mock.calls[0]?.[0] as CredentialRequestOptions;
+    expect(callArg.publicKey?.allowCredentials).toHaveLength(1);
+    // Verify the decoded bytes match the original
+    const decoded = callArg.publicKey?.allowCredentials?.[0]?.id;
+    expect(new Uint8Array(decoded as ArrayBuffer)).toEqual(rawBytes);
   });
 
   it('uses empty allowCredentials when no credentialId given', async () => {
