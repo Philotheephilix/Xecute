@@ -7,7 +7,9 @@ import { errorHandler } from './errors.js';
 
 export type Logger = pino.Logger;
 
-export async function createApp(config: BaseConfig, logger: Logger): Promise<FastifyInstance> {
+export type ReadyCheck = () => Promise<{ ready: boolean; reason?: string }>;
+
+export async function createApp(config: BaseConfig, logger: Logger, readyCheck?: ReadyCheck): Promise<FastifyInstance> {
   // pino.Logger is structurally compatible with FastifyBaseLogger
   const app = Fastify({
     loggerInstance: logger as unknown as FastifyBaseLogger,
@@ -20,7 +22,11 @@ export async function createApp(config: BaseConfig, logger: Logger): Promise<Fas
   });
 
   await app.register(cors, {
-    origin: config.NODE_ENV === 'local' ? true : false,
+    origin: config.NODE_ENV === 'local' ? true : [
+      /^chrome-extension:\/\//,
+      /^https:\/\/mcp\.philotheephilix\.in$/,
+      /^https:\/\/xecute\.philotheephilix\.in$/,
+    ],
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
   });
 
@@ -36,8 +42,14 @@ export async function createApp(config: BaseConfig, logger: Logger): Promise<Fas
     });
   });
 
-  // Ready check (can be overridden by services to check DB)
+  // Ready check — services can supply a readyCheck callback to include deeper checks (e.g. DB)
   app.get('/ready', async (_request, reply) => {
+    if (readyCheck) {
+      const result = await readyCheck();
+      if (!result.ready) {
+        return reply.status(503).send({ status: 'not_ready', reason: result.reason ?? 'check_failed' });
+      }
+    }
     return reply.status(200).send({ status: 'ready' });
   });
 

@@ -222,8 +222,8 @@ async function runSingleUserBuy(userId: number, fixturePort: number): Promise<Us
     });
 
     // Wait for chip
-    await page.waitForSelector('floors-chip', { timeout: 8_000 });
-    const chip = page.locator('floors-chip').first();
+    await page.waitForSelector('[data-floors-chip]', { timeout: 8_000 });
+    const chip = page.locator('[data-floors-chip]').first();
     await expect(chip).toBeAttached();
 
     // Record chip click time

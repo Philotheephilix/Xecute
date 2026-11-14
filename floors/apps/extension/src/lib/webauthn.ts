@@ -12,6 +12,8 @@ export interface PasskeyAssertion {
   clientDataJSON: Uint8Array;
   /** Raw 64-byte r‖s signature (NOT DER) */
   signature: Uint8Array;
+  /** Original DER-encoded signature from the authenticator (for server-side verification) */
+  signatureDer: Uint8Array;
   /** Base64URL-encoded credential ID */
   credentialId: string;
 }
@@ -71,11 +73,12 @@ export async function signWithPasskey(
   credentialId?: string,
 ): Promise<PasskeyAssertion> {
   const allowCredentials: PublicKeyCredentialDescriptor[] =
-    credentialId !== undefined
+    credentialId !== undefined && credentialId !== ''
       ? [
           {
-            id: Uint8Array.from(atob(credentialId), (c) => c.charCodeAt(0)),
+            id: Uint8Array.from(atob(credentialId.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0)),
             type: 'public-key' as const,
+            transports: ['internal'] as AuthenticatorTransport[],
           },
         ]
       : [];
@@ -108,7 +111,11 @@ export async function signWithPasskey(
   const assertionResponse = response as AuthenticatorAssertionResponse;
   const rawSig = new Uint8Array(assertionResponse.signature);
 
-  // Convert DER → raw r‖s
+  // Preserve the original DER signature for server-side verification.
+  // Node's crypto.createVerify expects DER-encoded ECDSA signatures.
+  const signatureDer = new Uint8Array(rawSig);
+
+  // Convert DER → raw r‖s (for NEAR/intents-based usage)
   let signature: Uint8Array;
   try {
     signature = derToRaw(rawSig);
@@ -134,6 +141,7 @@ export async function signWithPasskey(
     authenticatorData: new Uint8Array(assertionResponse.authenticatorData),
     clientDataJSON: new Uint8Array(assertionResponse.clientDataJSON),
     signature,
+    signatureDer,
     credentialId: (credential as PublicKeyCredential).id,
   };
 }

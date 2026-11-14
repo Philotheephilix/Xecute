@@ -9,8 +9,8 @@ import type postgres from 'postgres';
 // Global defaults
 // ---------------------------------------------------------------------------
 
-const DEFAULT_FLOOR_BPS = 500;        // 5%
-const DEFAULT_DURATION_SECS = 2592000; // 30 days
+const DEFAULT_FLOOR_BPS = 1000;       // 10%
+const DEFAULT_DURATION_SECS = 86400;  // 1 day
 
 // ---------------------------------------------------------------------------
 // Route registration

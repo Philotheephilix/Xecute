@@ -11,23 +11,17 @@ interface Props {
 const REQUIRE_INVITE =
   (import.meta as ImportMeta & { env: Record<string, string> }).env['VITE_REQUIRE_INVITE'] === 'true';
 
-export default function Welcome({ navigate, setAccount, className }: Props) {
+export default function Welcome({ navigate, className }: Props) {
   const [signInError, setSignInError] = useState<string | null>(null);
 
   const handleSignIn = () => {
     const accountId = localStorage.getItem('floors:account_id');
-    const credentialId = localStorage.getItem('floors:credential_id');
-    const publicKey = localStorage.getItem('floors:public_key');
-
-    if (!accountId || !credentialId || !publicKey) {
+    if (!accountId) {
       setSignInError('No existing account found.');
       return;
     }
-
-    const compressedKeyHex = localStorage.getItem('floors:compressed_key') ?? '';
     setSignInError(null);
-    setAccount({ accountId, credentialId, publicKey, compressedKeyHex });
-    navigate('portfolio');
+    navigate('sign-in');
   };
   return (
     <div className={className}>
@@ -43,14 +37,17 @@ export default function Welcome({ navigate, setAccount, className }: Props) {
               className="inline-flex items-center gap-1.5 px-4 py-2 bg-[#EF7B28] text-white border-2 border-[#111] rounded-full text-sm font-extrabold shadow-neo"
               style={{ transform: 'rotate(5deg)' }}
             >
-              ✦ Floors
+              ✦ Xecute
             </span>
           </div>
 
           {/* Logo wordmark */}
-          <h1 className="text-7xl font-black text-[#111] tracking-tight leading-none">
-            Floors
-          </h1>
+          <img
+            src="/brand/xecute-logo.svg"
+            alt="Xecute"
+            className="h-12 w-auto"
+            draggable={false}
+          />
 
           {/* Tagline */}
           <p className="text-xl font-bold text-gray-600 text-center leading-snug">

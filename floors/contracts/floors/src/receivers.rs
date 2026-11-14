@@ -388,7 +388,7 @@ impl Contract {
             self.release_quote(quote_id_bytes);
             return refusal;
         };
-        let Ok(expires_at_ns) = quote.expires_at_ns.parse::<u64>() else {
+        let Ok(_expires_at_ns) = quote.expires_at_ns.parse::<u64>() else {
             self.rollback_sleeve_hold(&quote.sleeve, floor_usdc);
             self.release_quote(quote_id_bytes);
             return refusal;
@@ -467,6 +467,14 @@ impl Contract {
         let decimals_pow = 10u128.pow(u32::from(asset_config.decimals));
         let _ = decimals_pow; // already computed as floor_usdc
 
+        // Floor expiry = block_timestamp + duration_secs (converted to nanoseconds).
+        // expires_at_ns from the quote is the QUOTE VALIDITY window (short TTL),
+        // NOT the floor protection duration. The user-chosen duration_secs is the
+        // actual floor lifetime.
+        let floor_expires_ns = env::block_timestamp()
+            .checked_add(u64::from(quote.duration_secs).checked_mul(1_000_000_000).expect("duration overflow"))
+            .expect("expires overflow");
+
         let floor = Floor {
             owner: sender_id.clone(),
             asset: quote.asset.clone(),
@@ -476,7 +484,7 @@ impl Contract {
             sleeve: quote.sleeve.clone(),
             fee_usdc: expected_fee,
             opened_ns: env::block_timestamp(),
-            expires_ns: expires_at_ns,
+            expires_ns: floor_expires_ns,
             status: FloorStatus::Active,
         };
 
@@ -543,7 +551,7 @@ impl Contract {
             fee_usdc: expected_fee.to_string(),
             platform_fee_usdc: platform_fee.to_string(),
             sleeve: quote.sleeve.clone(),
-            expires_ns: expires_at_ns.to_string(),
+            expires_ns: floor_expires_ns.to_string(),
             quote_id: quote_id_hex,
         });
 

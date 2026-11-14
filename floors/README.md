@@ -1,455 +1,400 @@
-# Floors
+<p align="center">
+  <img src="brand/xecute-logo.svg" alt="Xecute" width="280" />
+</p>
 
-Buy crypto from X posts — with downside protection.
+<h3 align="center">Buy crypto from X posts — with a floor.</h3>
 
-Floors is a browser extension that adds a **Buy** chip to X.com posts mentioning supported tokens. Users hold self-custodial NEAR smart accounts secured by device passkeys. Every buy can optionally be wrapped with a *floor* — a NEAR contract that guarantees a minimum return value, so if the token drops below the strike price the position automatically unwinds to USDC.
+<p align="center">
+  <a href="https://near.org"><img src="https://img.shields.io/badge/NEAR-Protocol-000?style=for-the-badge&logo=near&logoColor=white" alt="NEAR Protocol" /></a>
+  <a href="https://testnet.nearblocks.io/address/floors.floors-dev.testnet"><img src="https://img.shields.io/badge/Testnet-Live-29CEB4?style=for-the-badge" alt="Testnet Live" /></a>
+  <img src="https://img.shields.io/badge/Chrome-Extension-EF7B28?style=for-the-badge&logo=googlechrome&logoColor=white" alt="Chrome Extension" />
+  <img src="https://img.shields.io/badge/Rust-Smart_Contract-111?style=for-the-badge&logo=rust&logoColor=white" alt="Rust" />
+  <img src="https://img.shields.io/badge/WebAuthn-Passkeys-9662FF?style=for-the-badge" alt="WebAuthn Passkeys" />
+</p>
+
+<p align="center">
+  <strong>NEAR Hackathon Submission</strong> · Track: <em>Markets That Never Close</em>
+</p>
+
+---
+
+## The Problem
+
+You bought ETH at $1,900. It dropped to $1,500. **-21%.** No warning. No safety net. No way out.
+
+That's not investing. That's gambling. And right now, buying crypto from social media requires switching to an exchange, managing seed phrases, and accepting unlimited downside risk on every trade.
+
+## The Solution
+
+**Xecute** is a Chrome extension that lets you buy crypto directly from X.com posts — with built-in downside protection called a **floor**.
+
+<table>
+<tr>
+<td width="33%" align="center">
+  <h3>1. See</h3>
+  <p>Browse X. Spot a tweet about <code>$ETH</code>. An orange <strong>Buy</strong> chip appears next to the cashtag.</p>
+</td>
+<td width="33%" align="center">
+  <h3>2. Buy</h3>
+  <p>Tap the chip. Pick your amount. Set your floor level. Confirm with Face ID or fingerprint.</p>
+</td>
+<td width="33%" align="center">
+  <h3>3. Protected</h3>
+  <p>You own the token. If it pumps, you keep every dollar. If it dumps, <strong>your floor catches you</strong>.</p>
+</td>
+</tr>
+</table>
+
+> **Downside: capped. Upside: yours.**
+
+---
+
+## How It Works
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                           X.com Feed                                │
+│                                                                     │
+│   @VitalikButerin: "ETH looking strong $ETH 🔥"  [Buy $ETH]       │
+│                                                     ▲ Injected chip │
+└──────────────────────────────────┬──────────────────────────────────┘
+                                   │ Click
+                                   ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                       Extension Buy Sheet                           │
+│                                                                     │
+│   Buy $100 ETH                                                      │
+│   Floor: 95%  ·  Strike: $1,791/ETH  ·  Fee: $0.50                │
+│   Duration: 30 days                                                 │
+│                                                                     │
+│                  [ Confirm with Face ID ]                            │
+└──────────────────────────────────┬──────────────────────────────────┘
+                                   │ WebAuthn P-256 signature
+                                   ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                          NEAR Testnet                               │
+│                                                                     │
+│   ┌──────────┐    ┌──────────┐    ┌───────────────────────┐        │
+│   │ Ref      │───▶│ floors   │───▶│ User's 0s... account  │        │
+│   │ Finance  │    │ contract │    │ (NEP-616 passkey      │        │
+│   │ DEX Swap │    │ escrow + │    │  smart wallet)        │        │
+│   └──────────┘    │ reserve  │    └───────────────────────┘        │
+│                   └──────────┘                                      │
+│                        │                                            │
+│               Floor active ✓                                        │
+│          Protected for 30 days                                      │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### Floor Protection
+
+A **floor** is on-chain price insurance. When you buy ETH with a 95% floor:
+
+- The contract locks your ETH in escrow
+- USDC equal to `qty * floor_price` is reserved from the insurance pool (the "sleeve")
+- **If ETH drops below your floor price** — sell to floor, receive the guaranteed USDC amount
+- **If ETH rises** — close the position, take your ETH back, sell at market for full upside
+- **If the floor expires** — ETH is returned to you automatically
 
 ---
 
 ## Architecture
 
 ```
-floors/
-├── apps/
-│   ├── extension/        # Chrome MV3 extension (WXT 0.20)
-│   └── web/              # Onboarding web app (Vite + React)
-├── contracts/
-│   └── floors/           # NEAR smart contract (Rust, near-sdk 5)
-├── packages/
-│   ├── intents/          # WYSIWYS intent signing helpers
-│   ├── money/            # Bigint token math utilities
-│   ├── pricing/          # Price feed abstraction (Pyth + CoinGecko)
-│   ├── registry-schema/  # Shared token registry types
-│   ├── shared-server/    # Fastify base, DB, migrations, config
-│   ├── types/            # Cross-package TypeScript types
-│   └── wallet/           # NEAR wallet-contract client
-└── services/
-    ├── api/              # User-facing REST API          :3001
-    ├── relayer/          # NEAR transaction relayer      :3002
-    ├── risk/             # Quote signing + capacity      :3003
-    ├── registry/         # Token metadata registry       :3004
-    └── indexer/          # On-chain event indexer        :3005
+┌────────────────┐     ┌──────────────────────────────────────────────┐
+│  Chrome MV3    │     │               Backend Services               │
+│  Extension     │     │                                              │
+│  ┌───────────┐ │     │  ┌─────┐  ┌─────────┐  ┌──────┐  ┌───────┐ │
+│  │ Content   │─┼────▶│  │ API │─▶│ Relayer │─▶│ NEAR │  │ Risk  │ │
+│  │ Script    │ │     │  │:3001│  │ :3002   │  │ RPC  │  │ :3003 │ │
+│  └───────────┘ │     │  └──┬──┘  └─────────┘  └──────┘  └───────┘ │
+│  ┌───────────┐ │     │     │                                        │
+│  │ Buy Sheet │ │     │  ┌──┴──┐  ┌──────────┐  ┌───────┐          │
+│  │ (Preact)  │ │     │  │ DB  │  │ Registry │  │Indexer│          │
+│  └───────────┘ │     │  │Pg   │  │ :3004    │  │:3005  │          │
+└────────────────┘     │  └─────┘  └──────────┘  └───────┘          │
+                       └──────────────────────────────────────────────┘
+         │
+         ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│                         NEAR Testnet                                 │
+│                                                                      │
+│  floors.floors-dev.testnet  ·  Rust  ·  near-sdk 5.24               │
+│  Wallet: NEP-616 deterministic (WebAuthn P-256 passkeys)            │
+│  DEX: Ref Finance (testnet pool 2980)                               │
+│  Oracle: Pyth (mock on testnet)                                     │
+│  Quotes: Ed25519 signed floor quotes from risk service              │
+└──────────────────────────────────────────────────────────────────────┘
 ```
-
-All services are Fastify 5 + TypeScript. Monorepo managed by Turborepo + pnpm workspaces.
 
 ---
 
-## Prerequisites
+## Tech Stack
+
+| Component | Technology | Description |
+|-----------|-----------|-------------|
+| **Smart Contract** | Rust + near-sdk 5.24 | Floor lifecycle: open, sell, close, expire, auto-protect |
+| **Extension** | WXT 0.20 + Chrome MV3 | Content script injects buy chips on X.com cashtag links |
+| **Buy Sheet** | Preact + inline styles | Popup window (412x680) for the full purchase flow |
+| **Web App** | React + Vite + Tailwind | Onboarding, portfolio dashboard, position management |
+| **API** | Fastify 5 + TypeScript | REST endpoints, quote cache, submission tracking |
+| **Relayer** | Fastify 5 + near-api-js | NEAR transaction signing, Ref Finance swaps, floor bot |
+| **Risk** | Fastify 5 + Ed25519 | Floor quote pricing, capacity management, quote signing |
+| **Wallet** | NEP-616 + WebAuthn P-256 | Deterministic smart accounts — no seed phrases |
+| **DEX** | Ref Finance (testnet) | AMM swap via `ft_transfer_call` to pool 2980 |
+| **Oracle** | Pyth Network | On-chain price verification for floor opening |
+| **Intents** | NEAR Intents + 1Click | Cross-chain settlement (mainnet), solver network |
+| **Database** | PostgreSQL | Shared DB for API + relayer schemas |
+| **Monorepo** | Turborepo + pnpm | Shared packages, parallel builds |
+
+---
+
+## Hackathon Track Fit
+
+### Track 1: Markets That Never Close
+
+Xecute is built for this track:
+
+- **Non-custodial trading from social media** — no exchange account, no KYC, no app switching. Buy crypto from an X.com post with a passkey.
+- **Floor protection = decentralized put options** — the `floors` smart contract provides downside insurance backed by an on-chain USDC reserve pool, eliminating the need for centralized options desks.
+- **Settles on NEAR** — all swaps execute through Ref Finance on testnet, NEAR Intents + 1Click solver network on mainnet. Deep liquidity, no custodian.
+- **Can't be shut down** — the contract is on-chain, the extension runs locally, wallets are self-custodial. No single entity to switch it off.
+- **Chain Signatures ready** — NEP-616 deterministic wallets use WebAuthn P-256 passkeys. The same key derivation path extends to cross-chain signing.
+
+### Track 4: Open Innovation
+
+Buying crypto from a social media post with built-in downside protection is a new primitive. It combines social commerce, browser extension UX, passkey wallets, and on-chain derivatives into something that doesn't fit existing categories.
+
+---
+
+## Features
+
+- [x] Chrome extension with X.com cashtag detection (`$ETH`, `$SOL`)
+- [x] Buy ETH with floor price protection (5% / 10% configurable)
+- [x] WebAuthn passkeys — Face ID / fingerprint, no seed phrases
+- [x] NEP-616 deterministic wallet addresses (`0s...`)
+- [x] Ref Finance DEX integration (testnet pool 2980)
+- [x] Full floor lifecycle: open, sell to floor, close, expire
+- [x] Auto-protect bot (sells at floor before expiry if price drops)
+- [x] Real-time PnL tracking with portfolio chart
+- [x] Portfolio dashboard with positions and activity feed
+- [x] Ed25519 signed floor quotes from risk service
+- [x] Pyth oracle price verification on-chain
+- [x] WYSIWYS — What You See Is What You Sign (tamper-proof quote display)
+- [x] 4-tab navigation: Home, Portfolio, Activity, Settings
+- [x] Multiple passkey support per account
+- [x] SSE real-time order tracking (submitted → tracking → done)
+- [x] Partial outcome handling (swap succeeds, floor fails → user chooses next step)
+- [x] SOL/BTC graceful "coming soon" handling
+- [x] Invite code gating (optional)
+- [x] Neo-brutalist design system (thick borders, hard shadows, bold typography)
+
+---
+
+## Live on Testnet
+
+All transactions are verifiable on [NEAR Testnet Explorer](https://testnet.nearblocks.io).
+
+| Resource | Address |
+|----------|---------|
+| **Floors Contract** | [`floors.floors-dev.testnet`](https://testnet.nearblocks.io/address/floors.floors-dev.testnet) |
+| **USDC Token** | `usdc.fakes.testnet` |
+| **ETH Token** | `eth.fakes.testnet` |
+| **Ref Finance** | Pool 2980 on `ref-finance-101.testnet` |
+
+### Verified Transaction Hashes
+
+| Operation | TX Hash | Status |
+|-----------|---------|--------|
+| Floor Open | [`8cA7Km...`](https://testnet.nearblocks.io/txns/8cA7Km7cqh5dvb9KZ1dpcNsnESTu3exY6QB96mS2K6Ta) | ✅ Success |
+| Sell to Floor | [`GtTCtU...`](https://testnet.nearblocks.io/txns/GtTCtURjWfBEyyYNfPz4apxLSf2wMizYteMTH7PtQqtz) | ✅ Success |
+| Close Position | [`G53rf5...`](https://testnet.nearblocks.io/txns/G53rf5VsUhA91HdqpdcXDyeWXx2xKeBbQGZbQVehuAE6) | ✅ Success |
+| Expire Floor | [`C8rLZv...`](https://testnet.nearblocks.io/txns/C8rLZvEBpyhfTS61qjaCCfDdeapcsc4zQ6a3opHfSzLo) | ✅ Success |
+| Ref Finance Swap | [`7zcT5y...`](https://testnet.nearblocks.io/txns/7zcT5ySuXByd7958DCdrBbMYbTL3Ngi8UR2qaSUHUZMU) | ✅ Success |
+
+---
+
+## How to Test
+
+### Prerequisites
 
 | Tool | Version |
-|---|---|
-| Node.js | 26 |
-| pnpm | 12.18.0 |
-| Rust + Cargo | stable (see `rust-toolchain.toml`) |
+|------|---------|
+| Node.js | 26+ |
+| pnpm | 12+ |
 | Docker | any recent |
-| `cargo-near` | latest (`cargo install cargo-near`) |
+| Rust + Cargo | stable (for contract tests) |
 
-Install Node deps from the repo root:
+### Step-by-step
 
-```sh
+```bash
+# 1. Clone the repo
+git clone https://github.com/Philotheephilix/Xecute.git
+cd Xecute/floors
+
+# 2. Install dependencies
 pnpm install
-```
 
----
-
-## Local development
-
-### 1. Start infrastructure
-
-```sh
-# Postgres + NEAR sandbox + mock solver
-docker compose up -d
-
-# Or postgres only (if you don't need the sandbox/solver)
+# 3. Start Postgres
 docker compose up -d postgres
-```
 
-| Service | Host | Notes |
-|---|---|---|
-| Postgres | `localhost:5432` | user/pass/db: `floors` |
-| NEAR sandbox | `localhost:3030` | localnet RPC |
-| Mock solver | `localhost:4040` | 1Click solver stub |
-
-### 2. Configure environment
-
-Each service reads a `.env.local` file. Defaults work for local development — create the files if they don't exist:
-
-**`services/api/.env.local`**
-```env
+# 4. Create environment files
+# services/api/.env.local
+cat > services/api/.env.local << 'EOF'
 NODE_ENV=local
 PORT=3001
 DATABASE_URL=postgres://floors:floors@localhost:5432/floors
 RELAYER_URL=http://localhost:3002
 RISK_URL=http://localhost:3003
-```
+EOF
 
-**`services/relayer/.env.local`**
-```env
+# services/relayer/.env.local
+cat > services/relayer/.env.local << 'EOF'
 NODE_ENV=local
 PORT=3002
 DATABASE_URL=postgres://floors:floors@localhost:5432/floors
-NEAR_NODE_URL=http://localhost:3030
-NEAR_NETWORK_ID=sandbox
-NEAR_ACCOUNT_ID=alice.test.near
-NEAR_PRIVATE_KEY=ed25519:<key>
+NEAR_NODE_URL=https://rpc.testnet.near.org
+NEAR_NETWORK_ID=testnet
+NEAR_ACCOUNT_ID=<your-testnet-account>
+NEAR_PRIVATE_KEY=ed25519:<your-key>
 WALLET_CONTRACT_CODE_HASH=<64-hex-chars>
 FLOORS_CONTRACT=floors.floors-dev.testnet
-ONE_CLICK_API_URL=https://1click.chaindefuser.com
-# Optional — gates bot endpoints. Omit to leave them open in dev.
-# INTERNAL_SECRET=<random-secret>
-```
+EOF
 
-**`services/risk/.env.local`**
-```env
+# services/risk/.env.local
+cat > services/risk/.env.local << 'EOF'
 NODE_ENV=local
 PORT=3003
 DATABASE_URL=postgres://floors:floors@localhost:5432/floors
-RISK_SIGNING_KEY_HEX=<64-hex-chars>   # 32-byte Ed25519 seed, hex-encoded
-```
+RISK_SIGNING_KEY_HEX=<64-hex-ed25519-seed>
+EOF
 
-**`services/registry/.env.local`**
-```env
-NODE_ENV=local
-PORT=3004
-DATABASE_URL=postgres://floors:floors@localhost:5432/floors
-```
-
-**`services/indexer/.env.local`**
-```env
-NODE_ENV=local
-PORT=3005
-DATABASE_URL=postgres://floors:floors@localhost:5432/floors
-NEAR_NODE_URL=http://localhost:3030
-NEAR_NETWORK_ID=sandbox
-```
-
-**`apps/extension/.env.local`** (optional — defaults to localhost)
-```env
-VITE_API_URL=http://localhost:3001
-```
-
-### 3. Build packages
-
-Services depend on the shared packages. Build them first:
-
-```sh
+# 5. Build shared packages
 pnpm build
-```
 
-Or let Turborepo handle dependency order:
-
-```sh
-pnpm --filter "@floors/api" build     # builds shared deps first automatically
-```
-
-### 4. Run services
-
-```sh
-# All 5 services in one command (uses Makefile)
+# 6. Start all services
 make stack-services
+# Or individually:
+# pnpm --filter "@floors/api" dev
+# pnpm --filter "@floors/relayer" dev
+# pnpm --filter "@floors/risk" dev
 
-# Or individually
-pnpm --filter "@floors/api" dev
-pnpm --filter "@floors/relayer" dev
-pnpm --filter "@floors/risk" dev
-pnpm --filter "@floors/registry" dev
-pnpm --filter "@floors/indexer" dev
-```
-
-Migrations run automatically on startup. To run them manually:
-
-```sh
-pnpm --filter "@floors/api" migrate
-```
-
-### 5. Run the web app
-
-```sh
+# 7. Start the web app
 pnpm --filter "@floors/web" dev
 # → http://localhost:5173
-```
 
-### 6. Build the extension
-
-```sh
+# 8. Build the Chrome extension
 pnpm --filter "@floors/extension" build
 # → apps/extension/.output/chrome-mv3/
 ```
 
-Load the unpacked extension in Chrome:
-1. Open `chrome://extensions`
+### Load the extension
+
+1. Open `chrome://extensions` (or `brave://extensions`)
 2. Enable **Developer mode**
 3. Click **Load unpacked**
 4. Select `apps/extension/.output/chrome-mv3/`
 
-For live reload during development:
+### Try it
 
-```sh
-pnpm --filter "@floors/extension" dev
-```
+1. Visit [x.com](https://x.com) and search for `$ETH`
+2. Orange **Buy** chips appear next to cashtag mentions
+3. Click a chip or the extension toolbar icon
+4. Create a wallet (passkey — Face ID / fingerprint)
+5. Fund your account with testnet USDC (send to your `0s...` address)
+6. Buy ETH with floor protection
+7. Check your portfolio — positions, PnL, activity feed
 
----
+### Run tests
 
-## Database migrations
+```bash
+# TypeScript unit tests
+pnpm test
 
-Migrations are plain SQL files applied in filename order at service startup. They live alongside each service:
-
-```
-services/api/migrations/
-  001_initial.sql
-  002_buy_submissions.sql
-  003_invite_codes.sql
-  004_positions_text_pk.sql
-
-services/relayer/migrations/
-  001_initial.sql
-  002_swap_intents.sql
-  003_smart_accounts.sql
-  004_nonce_table.sql
-```
-
-Both services share the same Postgres instance. `api` migrations create the `api` schema; `relayer` migrations create the `relayer` schema.
-
----
-
-## NEAR smart contract
-
-### Build
-
-```sh
-cd contracts
-cargo build --target wasm32-unknown-unknown --release
-```
-
-Or with `cargo-near`:
-
-```sh
-cargo near build
-```
-
-Output: `contracts/target/wasm32-unknown-unknown/release/floors.wasm`
-
-### Test
-
-```sh
-# Unit tests (no network)
+# Rust contract tests
 cd contracts/floors && cargo test
 
-# Or via Makefile
-make test-contracts
-```
+# E2E tests (web app) — requires services running
+cd apps/web && PW_DISABLE_TS_ESM=1 pnpm exec playwright test
 
-### Deploy to testnet
-
-```sh
-# Deploy to an existing account
-near deploy floors.YOUR_ACCOUNT.testnet \
-  contracts/target/wasm32-unknown-unknown/release/floors.wasm
-
-# Initialize (first deploy only)
-near call floors.YOUR_ACCOUNT.testnet new \
-  '{"owner_id": "YOUR_ACCOUNT.testnet", "params": {...}}' \
-  --accountId YOUR_ACCOUNT.testnet
-```
-
-The deployed testnet contract is `floors.floors-dev.testnet`.
-
----
-
-## Testing
-
-### Unit tests (all packages + contract)
-
-```sh
-make test
-# or
-pnpm test           # TypeScript packages via Turborepo
-make test-contracts # Rust contract unit tests
-```
-
-### End-to-end tests (web app)
-
-Services and Postgres must be running (see [Local development](#local-development) above).
-
-```sh
-cd apps/web
-PW_DISABLE_TS_ESM=1 pnpm exec playwright test
-```
-
-Test files:
-- `e2e/onboarding.spec.ts` — full onboarding flow (welcome → fund)
-- `e2e/floors-p2.spec.ts` — floor open, expire, unwind
-- `e2e/floors-p3.spec.ts` — bot methods (reconcile, auto-protect, views)
-
-All tests use a CDP virtual WebAuthn authenticator — real browser API, no mocks.
-
-### End-to-end tests (extension)
-
-```sh
+# E2E tests (extension)
 pnpm --filter "@floors/extension" build
 PW_DISABLE_TS_ESM=1 pnpm --filter "@floors/extension" e2e
 ```
 
-Test files:
-- `e2e/smoke-buy.spec.ts`
-- `e2e/chip-injection.spec.ts`
-- `e2e/multi-user-buy.spec.ts`
+---
 
-### Type checking
+## Project Structure
 
-```sh
-pnpm typecheck
 ```
-
-### Linting
-
-```sh
-pnpm lint
-```
-
----
-
-## Key concepts
-
-### Passkeys
-
-User accounts are controlled by device passkeys (P-256 / ES256). No seed phrases. The passkey credential ID and compressed public key are stored in `localStorage` and registered on the NEAR wallet contract at account creation.
-
-### Floors (downside protection)
-
-A *floor* is an on-chain position on the `floors` contract. When a user buys a token with a floor, the relayer opens a floor that locks a USDC reserve. If the token price falls below the strike, the contract automatically sells the position back to USDC. The user is guaranteed to recover at least the floor value.
-
-### NEAR Intents / 1Click
-
-Swaps route through NEAR Intents (`intents.near`) via the 1Click solver API (`https://1click.chaindefuser.com`). The relayer submits signed solver quotes on behalf of users.
-
-### WYSIWYS
-
-Before any WebAuthn signature, the extension displays a human-readable summary of the exact on-chain action being signed (What You See Is What You Sign). This is enforced by `@floors/intents::verifyAgainstSheet`.
-
----
-
-## Service ports
-
-| Service | Port | Purpose |
-|---|---|---|
-| api | 3001 | User-facing REST API |
-| relayer | 3002 | NEAR transaction relay, floor bot |
-| risk | 3003 | Quote signing, capacity management |
-| registry | 3004 | Token metadata |
-| indexer | 3005 | On-chain event indexer |
-| Web app | 5173 | Onboarding UI (dev only) |
-| Postgres | 5432 | Shared database |
-| NEAR sandbox | 3030 | Local NEAR RPC |
-| Mock solver | 4040 | 1Click solver stub |
-
----
-
-## Environment variables reference
-
-### All services (base)
-
-| Variable | Required | Default | Description |
-|---|---|---|---|
-| `NODE_ENV` | yes | — | `local` \| `testnet` \| `canary` \| `production` |
-| `PORT` | yes | — | HTTP listen port |
-| `DATABASE_URL` | yes | — | Postgres connection URL |
-| `LOG_LEVEL` | no | `info` | `debug` \| `info` \| `warn` \| `error` |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | no | — | OpenTelemetry collector URL |
-
-### api (additional)
-
-| Variable | Default | Description |
-|---|---|---|
-| `RELAYER_URL` | `http://localhost:3002` | Relayer service URL |
-| `RISK_URL` | `http://localhost:3003` | Risk service URL |
-
-### relayer (additional)
-
-| Variable | Default | Description |
-|---|---|---|
-| `NEAR_NODE_URL` | `http://localhost:3030` | NEAR RPC URL |
-| `NEAR_NETWORK_ID` | `sandbox` | `sandbox` \| `testnet` \| `mainnet` |
-| `NEAR_ACCOUNT_ID` | — | Relayer signing account |
-| `NEAR_PRIVATE_KEY` | — | `ed25519:<base58-key>` |
-| `WALLET_CONTRACT_CODE_HASH` | — | SHA-256 of wallet WASM (64 hex chars) |
-| `FLOORS_CONTRACT` | `floors.floors-dev.testnet` | Floors contract account |
-| `ONE_CLICK_API_URL` | `https://1click.chaindefuser.com` | 1Click solver endpoint |
-| `INTERNAL_SECRET` | — | Bearer secret for bot endpoints (omit to leave open in dev) |
-
-### risk (additional)
-
-| Variable | Description |
-|---|---|
-| `RISK_SIGNING_KEY_HEX` | 32-byte Ed25519 seed hex (64 chars) — signs floor quotes |
-
-### Extension / web app
-
-| Variable | Default | Description |
-|---|---|---|
-| `VITE_API_URL` | `http://localhost:3001` | API base URL |
-| `VITE_REQUIRE_INVITE` | `false` | Set `true` to require invite codes at signup |
-
----
-
-## Makefile targets
-
-```sh
-make test           # pnpm test + cargo test
-make test-contracts # cargo test only
-make lint           # pnpm lint
-make typecheck      # pnpm typecheck
-make build          # pnpm build
-make stack          # docker compose up -d (all services)
-make stack-down     # docker compose down
-make stack-services # postgres only + all 5 Node services in background
-make e2e            # build extension + run playwright
+floors/
+├── apps/
+│   ├── extension/          # Chrome MV3 extension (WXT 0.20)
+│   │   ├── src/entrypoints/
+│   │   │   ├── content.ts          # Cashtag detection + chip injection
+│   │   │   ├── bridge.content.ts   # Message forwarding + storage sync
+│   │   │   ├── background.ts       # Service worker
+│   │   │   └── sheet/              # Buy sheet popup (Preact)
+│   │   └── e2e/                    # Playwright extension tests
+│   └── web/                # Onboarding + portfolio app (React + Vite)
+│       ├── src/screens/            # Welcome → Fund → Home → Portfolio
+│       └── e2e/                    # Playwright web tests
+├── contracts/
+│   └── floors/             # NEAR smart contract (Rust, near-sdk 5.24)
+│       ├── src/
+│       │   ├── lib.rs              # Contract entry, initialization
+│       │   ├── floors.rs           # Core lifecycle: open, close, sell, expire
+│       │   ├── sleeves.rs          # Insurance pool management
+│       │   ├── bot_methods.rs      # Auto-protect, reconcile, unwind
+│       │   ├── receivers.rs        # ft_on_transfer, mt_on_transfer
+│       │   └── receivers_auth.rs   # on_auth (user-signed actions)
+│       └── tests/                  # Integration tests
+├── packages/
+│   ├── intents/            # WYSIWYS intent signing helpers
+│   ├── money/              # Bigint token math
+│   ├── pricing/            # Price feeds (Pyth + CoinGecko)
+│   ├── registry-schema/    # Shared token registry types
+│   ├── shared-server/      # Fastify base, DB, migrations
+│   ├── types/              # Cross-package TypeScript types
+│   └── wallet/             # NEP-616 address derivation
+└── services/
+    ├── api/                # REST API (Fastify 5)            :3001
+    ├── relayer/            # NEAR tx relay + floor bot       :3002
+    ├── risk/               # Quote pricing + Ed25519 signing :3003
+    ├── registry/           # Token metadata                  :3004
+    └── indexer/            # On-chain event indexer          :3005
 ```
 
 ---
 
-## Project structure (detailed)
+## What's Next
 
-```
-apps/extension/
-  src/
-    background/       # Service worker
-    content/          # Content script — chip injection into X posts
-    entrypoints/
-      sheet/          # Buy sheet side-panel (React)
-apps/web/
-  src/
-    api/              # API client
-    lib/              # passkey.ts, utils
-    screens/          # One file per onboarding screen
-  e2e/                # Playwright specs
-
-services/api/
-  src/
-    routes/           # accounts, quotes, actions, submit, buy
-    migrations/       # SQL migration files
-
-services/relayer/
-  src/
-    routes/           # relay.ts (NEAR tx relay + floor bot endpoints)
-  migrations/
-
-contracts/floors/
-  src/
-    floors.rs         # Core floor lifecycle (open, close, sell_to_floor)
-    bot_methods.rs    # Auto-protect, reconcile, unwind
-    receivers.rs      # ft_on_transfer, on_open_price, on_sell_payout
-    receivers_auth.rs # on_auth (user-signed actions: close, sell, withdraw)
-    state.rs          # All storage structs
-    views.rs          # Read-only view methods
-  tests/              # Integration tests (near-workspaces)
-```
+- **Mainnet deployment** with real NEAR Intents and 1Click solver network
+- **Cross-chain settlement** — buy ETH on Ethereum, SOL on Solana, all settling through NEAR
+- **More assets** — SOL and BTC pools with dedicated sleeves
+- **Mobile app** — same passkey, same floor protection, native experience
+- **Auto-protect bot** — automatically sells at floor price before expiry if the market drops
+- **Trading agents** — AI-powered buy signals that execute with floor protection
+- **Limit floors** — set a floor that activates only if price reaches a target first
 
 ---
 
-## Contributing
+## Team
 
-PRs require review from `@philotheephilix`. Contract changes under `contracts/` require two approvals.
+Built by [philotheephilix](https://github.com/Philotheephilix)
 
-**No mocks.** Tests run against real infrastructure — CDP virtual WebAuthn for passkeys, real Postgres, real NEAR sandbox or testnet. `page.route()`, `vi.mock()`, and stubbed responses are not allowed.
+---
+
+## License
+
+MIT
+
+---
+
+<p align="center">
+  <strong>Stop gambling. Start trading with a floor.</strong>
+</p>
+
+<p align="center">
+  <a href="https://github.com/Philotheephilix/Xecute">GitHub</a> · <a href="https://testnet.nearblocks.io/address/floors.floors-dev.testnet">Contract on Testnet</a>
+</p>

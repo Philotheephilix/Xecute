@@ -18,11 +18,14 @@ contracts/target/
 # Test / coverage
 coverage/
 *.lcov
+test-results/
+playwright-report/
 
 # Environment
 .env
 .env.local
 .env.*.local
+deploy/.env.prod
 
 # OS
 .DS_Store
@@ -35,3 +38,12 @@ Thumbs.db
 
 # pnpm
 .pnpm-debug.log
+
+# Claude / agent tooling
+.agents/
+.claude/
+.wxt/
+.impeccable/
+research/
+skills-lock.json
+docs/brag-output/

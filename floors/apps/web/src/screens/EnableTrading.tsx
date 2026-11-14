@@ -1,8 +1,6 @@
 import { useState } from 'react';
 import type { Screen, AccountState } from '../App';
-import { signWithPasskey } from '../lib/passkey';
-import { getEnableTradingRequest, enableTrading } from '../api/client';
-import { toHex } from '../lib/passkey';
+import { enableTrading } from '../api/client';
 
 interface Props {
   navigate: (to: Screen) => void;
@@ -11,72 +9,33 @@ interface Props {
   className: string;
 }
 
-type Phase = 'idle' | 'requesting' | 'signing' | 'submitting' | 'skipping' | 'done' | 'error';
+type Phase = 'idle' | 'submitting' | 'skipping' | 'done' | 'error';
 
 export default function EnableTrading({ navigate, account, className }: Props) {
   const [phase, setPhase] = useState<Phase>('idle');
   const [error, setError] = useState<string | null>(null);
 
   const accountId = account?.accountId;
-  const credentialId = account?.credentialId;
+  const publicKey = account?.compressedKeyHex;
 
   const handleEnable = async () => {
-    if (!accountId || !credentialId) {
+    if (!accountId || !publicKey) {
       setError('Account not found — please restart onboarding');
       setPhase('error');
       return;
     }
 
     setError(null);
-    setPhase('requesting');
+    setPhase('submitting');
 
     try {
-      // Step 1: ask API for a wallet_request to sign
-      const requestResult = await getEnableTradingRequest(accountId);
-
-      if (requestResult === null) {
-        // Endpoint not implemented yet — show brief feedback then continue
-        console.warn('[floors] enable-trading-request not available, skipping step');
-        setPhase('skipping');
-        await new Promise<void>((r) => setTimeout(r, 800));
-        navigate('fund');
-        return;
-      }
-
-      const { wallet_request, challenge } = requestResult;
-
-      // Step 2: sign challenge with passkey
-      setPhase('signing');
-      // Use the challenge bytes returned by the API — avoids JSON key-order dependency
-      function hexToBytes(hex: string): Uint8Array {
-        const bytes = new Uint8Array(hex.length / 2);
-        for (let i = 0; i < bytes.length; i++) {
-          bytes[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
-        }
-        return bytes;
-      }
-      const challengeBytes = hexToBytes(challenge);
-
-      const assertion = await signWithPasskey(challengeBytes, credentialId);
-
-      // Step 3: submit signed assertion to relayer
-      setPhase('submitting');
-      const signatureHex = toHex(assertion.signature);
-
-      await enableTrading(accountId, {
-        signature: signatureHex,
-        credential_id: credentialId,
-        wallet_request,
-      });
-
+      await enableTrading(accountId, publicKey);
       setPhase('done');
-
-      // Brief pause so user can see the success state, then navigate
       await new Promise<void>((r) => setTimeout(r, 600));
       navigate('fund');
     } catch (err) {
       console.error('[floors] enable-trading error:', err);
-      setError(err instanceof Error ? err.message : 'Enable trading failed');
+      setError(err instanceof Error ? err.message : 'Registration failed');
       setPhase('error');
     }
   };
@@ -85,12 +44,10 @@ export default function EnableTrading({ navigate, account, className }: Props) {
     navigate('fund');
   };
 
-  const isLoading = phase === 'requesting' || phase === 'signing' || phase === 'submitting' || phase === 'skipping';
+  const isLoading = phase === 'submitting' || phase === 'skipping';
 
   const phaseLabel: Record<Phase, string> = {
     idle: 'Enable Trading',
-    requesting: 'Preparing…',
-    signing: 'Waiting for fingerprint…',
     submitting: 'Registering on NEAR…',
     skipping: 'Setup not available, continuing…',
     done: 'Trading enabled!',
@@ -120,7 +77,7 @@ export default function EnableTrading({ navigate, account, className }: Props) {
           Register with NEAR Intents
         </h1>
         <p className="text-base font-semibold text-gray-600 leading-relaxed mb-10">
-          One fingerprint registers your passkey with NEAR Intents.
+          One tap registers your key with NEAR Intents.
         </p>
 
         {/* Illustration */}

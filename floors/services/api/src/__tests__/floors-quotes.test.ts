@@ -211,8 +211,8 @@ describe('GET /v1/suggestions', () => {
       floor_bps: number;
       duration_secs: number;
     };
-    expect(body.floor_bps).toBe(500);
-    expect(body.duration_secs).toBe(2592000);
+    expect(body.floor_bps).toBe(1000);
+    expect(body.duration_secs).toBe(86400);
   });
 
   it('ignores unknown query params', async () => {

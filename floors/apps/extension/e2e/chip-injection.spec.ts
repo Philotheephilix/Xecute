@@ -33,7 +33,7 @@ test.describe('X adapter chip injection', () => {
     // Give content script time to inject
     await page.waitForTimeout(1500);
 
-    const chip = page.locator('floors-chip').first();
+    const chip = page.locator('[data-floors-chip]').first();
     await expect(chip).toBeAttached();
 
     await context.close();
@@ -52,7 +52,7 @@ test.describe('X adapter chip injection', () => {
     await page.goto(`file://${fixturesDir}/post-with-sol.html`);
     await page.waitForTimeout(1500);
 
-    const chip = page.locator('floors-chip').first();
+    const chip = page.locator('[data-floors-chip]').first();
     await expect(chip).toBeAttached();
 
     await context.close();
@@ -71,7 +71,7 @@ test.describe('X adapter chip injection', () => {
     await page.goto(`file://${fixturesDir}/post-no-cashtag.html`);
     await page.waitForTimeout(1500);
 
-    const chips = page.locator('floors-chip');
+    const chips = page.locator('[data-floors-chip]');
     await expect(chips).toHaveCount(0);
 
     await context.close();
@@ -96,7 +96,7 @@ test.describe('X adapter chip injection', () => {
     `);
     await page.waitForTimeout(1500);
 
-    const chips = page.locator('floors-chip');
+    const chips = page.locator('[data-floors-chip]');
     await expect(chips).toHaveCount(0);
 
     await context.close();
@@ -116,9 +116,49 @@ test.describe('X adapter chip injection', () => {
     await page.waitForTimeout(1500);
 
     // At least one chip from the ETH/SOL cashtags in the fixture
-    const chips = page.locator('floors-chip');
+    const chips = page.locator('[data-floors-chip]');
     const count = await chips.count();
     expect(count).toBeGreaterThan(0);
+
+    await context.close();
+  });
+
+  test('chip appears on ETH span in v2 DOM fixture (no data-testid)', async () => {
+    const context = await chromium.launchPersistentContext('', {
+      headless: false,
+      args: [
+        `--disable-extensions-except=${extensionPath}`,
+        `--load-extension=${extensionPath}`,
+      ],
+    });
+
+    const page = await context.newPage();
+    await page.goto(`file://${fixturesDir}/post-with-eth-v2.html`);
+    await page.waitForTimeout(1500);
+
+    const chip = page.locator('[data-floors-chip]').first();
+    await expect(chip).toBeAttached();
+
+    await context.close();
+  });
+
+  test('multiple chips in v2 timeline fixture', async () => {
+    const context = await chromium.launchPersistentContext('', {
+      headless: false,
+      args: [
+        `--disable-extensions-except=${extensionPath}`,
+        `--load-extension=${extensionPath}`,
+      ],
+    });
+
+    const page = await context.newPage();
+    await page.goto(`file://${fixturesDir}/timeline-v2.html`);
+    await page.waitForTimeout(1500);
+
+    // Timeline has ETH, SOL, BTC, ETH — 4 supported cashtags across tweets
+    const chips = page.locator('[data-floors-chip]');
+    const count = await chips.count();
+    expect(count).toBeGreaterThanOrEqual(3);
 
     await context.close();
   });
@@ -137,7 +177,7 @@ test.describe('X adapter chip injection', () => {
     await page.waitForTimeout(1000);
 
     // Count chips before
-    const countBefore = await page.locator('floors-chip').count();
+    const countBefore = await page.locator('[data-floors-chip]').count();
 
     // Force a re-observe cycle (simulate X partial re-render)
     await page.evaluate(() => {
@@ -152,7 +192,7 @@ test.describe('X adapter chip injection', () => {
     });
 
     await page.waitForTimeout(500);
-    const countAfter = await page.locator('floors-chip').count();
+    const countAfter = await page.locator('[data-floors-chip]').count();
 
     // Should not have grown by more than the one new anchor we briefly added
     expect(countAfter).toBeLessThanOrEqual(countBefore + 1);

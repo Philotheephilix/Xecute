@@ -1,7 +1,54 @@
-import { sha3_256 } from 'js-sha3';
+import sha3 from 'js-sha3';
+const { sha3_256 } = sha3;
 
 // ---------------------------------------------------------------------------
-// Types
+// Types — Contract RequestMessage format (w_execute_signed)
+// ---------------------------------------------------------------------------
+
+/** Payload for a function_call action inside a NearPromise. */
+export interface FunctionCallPayload {
+  function_name: string;
+  args: string;             // base64-encoded raw bytes
+  deposit?: string;         // yoctoNEAR decimal; default "0"
+  gas?: string;             // gas decimal; default "0" (serde default)
+  gas_weight?: number;      // default 1
+}
+
+/** A single action inside a NearPromise. */
+export interface NearActionJSON {
+  action: 'function_call';
+  payload: FunctionCallPayload;
+}
+
+/** A single outgoing promise in the Request. */
+export interface NearPromiseJSON {
+  receiver_id: string;
+  refund_to?: string;       // optional AccountId
+  actions: NearActionJSON[];
+}
+
+/** The Request struct (internal ops + external promises). */
+export interface RequestJSON {
+  internal?: never[];       // WalletOp — unused in our flow
+  external?: NearPromiseJSON[];
+}
+
+/**
+ * The contract's RequestMessage — the `msg` parameter for `w_execute_signed`.
+ * JSON shape matches the Rust serde representation exactly.
+ */
+export interface RequestMessage {
+  pay_for_gas?: boolean;    // default false; omitted in JSON when false
+  chain_id: string;         // e.g. "testnet"
+  signer_id: string;        // e.g. "0s..."
+  nonce: number;            // u32
+  created_at: string;       // RFC-3339 timestamp
+  timeout_secs: number;     // seconds (u32)
+  request: RequestJSON;
+}
+
+// ---------------------------------------------------------------------------
+// Types — Legacy WalletRequest (kept for backward compat)
 // ---------------------------------------------------------------------------
 
 export interface ExternalCall {
@@ -145,7 +192,176 @@ export function hashWalletRequest(req: WalletRequest): Uint8Array {
 }
 
 // ---------------------------------------------------------------------------
-// validateWalletRequest
+// RequestMessage Borsh serialization (contract format)
+// ---------------------------------------------------------------------------
+
+function borshBool(v: boolean): Uint8Array {
+  return new Uint8Array([v ? 1 : 0]);
+}
+
+function borshU32(v: number): Uint8Array {
+  const buf = new Uint8Array(4);
+  new DataView(buf.buffer).setUint32(0, v >>> 0, true);
+  return buf;
+}
+
+function borshU128(v: bigint): Uint8Array {
+  const lo = v & ((1n << 64n) - 1n);
+  const hi = v >> 64n;
+  return concat(borshU64(lo), borshU64(hi));
+}
+
+function borshBytes(b: Uint8Array): Uint8Array {
+  return concat(borshU32(b.length), b);
+}
+
+function borshOption<T>(v: T | null | undefined, fn: (val: T) => Uint8Array): Uint8Array {
+  if (v === null || v === undefined) return new Uint8Array([0]);
+  return concat(new Uint8Array([1]), fn(v));
+}
+
+function borshVec<T>(arr: T[], fn: (item: T) => Uint8Array): Uint8Array {
+  return concat(borshU32(arr.length), ...arr.map(fn));
+}
+
+/** Borsh NearToken = u128 little-endian (yoctoNEAR). */
+function borshNearToken(yocto: string | undefined): Uint8Array {
+  return borshU128(BigInt(yocto ?? '0'));
+}
+
+/** Borsh Gas = u64 little-endian. */
+function borshGas(gas: string | undefined): Uint8Array {
+  return borshU64(BigInt(gas ?? '0'));
+}
+
+/**
+ * Borsh-serialize a FunctionCall.
+ * Layout: function_name(String) + args(Vec<u8>) + deposit(u128) + gas(u64) + gas_weight(u64)
+ *
+ * NOTE: `args` in JSON is base64-encoded; Borsh expects raw bytes.
+ */
+function borshFunctionCall(fc: FunctionCallPayload): Uint8Array {
+  // Decode base64 args to raw bytes
+  const argsRaw = fc.args
+    ? Uint8Array.from(atob(fc.args), (c) => c.charCodeAt(0))
+    : new Uint8Array(0);
+
+  return concat(
+    borshString(fc.function_name),
+    borshBytes(argsRaw),
+    borshNearToken(fc.deposit),
+    borshGas(fc.gas),
+    borshU64(BigInt(fc.gas_weight ?? 1)),
+  );
+}
+
+/**
+ * Borsh-serialize a NearAction enum.
+ * Layout: discriminant(u8) + payload
+ *   FunctionCall = 2
+ */
+function borshNearAction(action: NearActionJSON): Uint8Array {
+  if (action.action === 'function_call') {
+    return concat(new Uint8Array([2]), borshFunctionCall(action.payload));
+  }
+  throw new Error(`Unsupported NearAction variant: ${action.action}`);
+}
+
+/**
+ * Borsh-serialize a NearPromise.
+ * Layout: receiver_id(String) + refund_to(Option<String>) + actions(Vec<NearAction>)
+ */
+function borshNearPromise(promise: NearPromiseJSON): Uint8Array {
+  return concat(
+    borshString(promise.receiver_id),
+    borshOption(promise.refund_to ?? null, borshString),
+    borshVec(promise.actions, borshNearAction),
+  );
+}
+
+/**
+ * Borsh-serialize a Request.
+ * Layout: internal(Vec<WalletOp>) + external(Vec<NearPromise>)
+ */
+function borshRequest(req: RequestJSON): Uint8Array {
+  const internal = req.internal ?? [];
+  const external = req.external ?? [];
+  return concat(
+    borshVec(internal, () => { throw new Error('WalletOp serialization not implemented'); }),
+    borshVec(external, borshNearPromise),
+  );
+}
+
+/**
+ * Borsh-serialize a RequestMessage (the msg for `w_execute_signed`).
+ *
+ * Layout:
+ *   pay_for_gas(bool) + chain_id(String) + signer_id(String) + nonce(u32)
+ *   + created_at(u64 nanoseconds) + timeout(u32 seconds) + request(Request)
+ */
+export function borshRequestMessage(msg: RequestMessage): Uint8Array {
+  const createdAtMs = new Date(msg.created_at).getTime();
+  const createdAtNs = BigInt(createdAtMs) * 1_000_000n;
+
+  return concat(
+    borshBool(msg.pay_for_gas ?? false),
+    borshString(msg.chain_id),
+    borshString(msg.signer_id),
+    borshU32(msg.nonce),
+    borshU64(createdAtNs),
+    borshU32(msg.timeout_secs),
+    borshRequest(msg.request),
+  );
+}
+
+/**
+ * Compute the canonical hash of a RequestMessage:
+ *
+ *   SHA3-256(b"NEAR_WALLET_CONTRACT/V1" || borsh(msg))
+ *
+ * This is the challenge that must be signed via WebAuthn for `w_execute_signed`.
+ */
+export function hashRequestMessage(msg: RequestMessage): Uint8Array {
+  const body = borshRequestMessage(msg);
+  const payload = concat(PREFIX, body);
+  const hashHex = sha3_256(payload);
+  const result = new Uint8Array(32);
+  for (let i = 0; i < 32; i++) {
+    result[i] = parseInt(hashHex.slice(i * 2, i * 2 + 2), 16);
+  }
+  return result;
+}
+
+/**
+ * Build a RequestMessage for `w_execute_signed` with a fresh random nonce
+ * and a created_at timestamp set 60 seconds in the past (for block lag).
+ */
+export function buildRequestMessage(
+  chainId: string,
+  signerId: string,
+  external: NearPromiseJSON[],
+  timeoutSecs: number = 3600,
+): RequestMessage {
+  // Random u32 nonce
+  const nonce = crypto.getRandomValues(new Uint32Array(1))[0]!;
+
+  // Set created_at 60 seconds in the past to account for block timestamp lag
+  const createdAt = new Date(Date.now() - 60_000).toISOString().replace(/\.\d{3}Z$/, 'Z');
+
+  return {
+    chain_id: chainId,
+    signer_id: signerId,
+    nonce,
+    created_at: createdAt,
+    timeout_secs: timeoutSecs,
+    request: {
+      external,
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// validateWalletRequest (legacy)
 // ---------------------------------------------------------------------------
 
 /**

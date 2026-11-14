@@ -250,6 +250,19 @@ impl Contract {
         self.assert_admin();
         self.roles.unwind_bot = account;
     }
+
+    /// Set min_floor_usdc directly. Owner or admin only.
+    /// For testnet: allows lowering the minimum so small amounts can open floors.
+    pub fn set_min_floor_usdc(&mut self, value: near_sdk::json_types::U128) {
+        self.assert_admin();
+        self.params.min_floor_usdc = value.0;
+    }
+
+    /// Set quote_ttl_max_secs directly. Owner or admin only.
+    pub fn set_quote_ttl_max_secs(&mut self, value: u32) {
+        self.assert_admin();
+        self.params.quote_ttl_max_secs = value;
+    }
 }
 
 // ---------------------------------------------------------------------------

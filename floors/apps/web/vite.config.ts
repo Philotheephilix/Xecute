@@ -8,13 +8,23 @@ export default defineConfig({
     react(),
   ],
   server: {
+    proxy: {
+      '/v1/relay': {
+        target: 'http://localhost:3002',
+        changeOrigin: true,
+      },
+      '/v1': {
+        target: 'http://localhost:3001',
+        changeOrigin: true,
+      },
+    },
     headers: {
       'Content-Security-Policy': [
         "default-src 'self'",
         "script-src 'self' 'unsafe-inline'",
         "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
         "font-src 'self' https://fonts.gstatic.com",
-        "connect-src 'self' http://localhost:3001",
+        "connect-src 'self'",
         "img-src 'self' data:",
         "frame-ancestors 'none'",
         "base-uri 'self'",

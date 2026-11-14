@@ -30,12 +30,24 @@ const HAZARD: Record<string, number> = {
   STRK: 0.001, // long-tail Tier A: 0.1% per day
 };
 
-/** Full NEP-141 asset IDs as used by intents.near / mt_on_transfer. */
-const NEP141_ASSET_IDS: Record<string, string> = {
+/** Full NEP-141 asset IDs as used by intents / mt_on_transfer. */
+const NEP141_ASSET_IDS_MAINNET: Record<string, string> = {
   ETH: 'nep141:eth.omft.near',
   SOL: 'nep141:sol.omft.near',
   STRK: 'nep141:strk.omft.near',
 };
+
+const NEP141_ASSET_IDS_TESTNET: Record<string, string> = {
+  ETH: 'nep141:eth.fakes.testnet',
+  SOL: 'nep141:sol.fakes.testnet',
+  STRK: 'nep141:strk.fakes.testnet',
+};
+
+/** Resolved at startup from NEAR_NETWORK_ID env var. */
+const NEP141_ASSET_IDS: Record<string, string> =
+  process.env['NEAR_NETWORK_ID'] === 'mainnet'
+    ? NEP141_ASSET_IDS_MAINNET
+    : NEP141_ASSET_IDS_TESTNET;
 
 /** Sleeve identifier per asset. */
 const SLEEVE: Record<string, string> = {
@@ -54,8 +66,8 @@ const QuoteRequestSchema = z.object({
   qty: z.string().regex(/^\d+$/, 'qty must be a non-negative integer string'),
   /** Floor level in basis points: 100–5000 (1%–50%) */
   floor_bps: z.number().int().min(100).max(5000),
-  /** Duration in seconds: 1 day to 1 year */
-  duration_secs: z.number().int().min(86_400).max(31_536_000),
+  /** Duration in seconds: 1 hour (testnet min) to 1 year */
+  duration_secs: z.number().int().min(3_600).max(31_536_000),
   /** NEAR account ID of the floor buyer */
   owner: z.string().min(2).max(64),
   /**
@@ -309,6 +321,8 @@ export function registerRiskQuoteRoutes(app: FastifyInstance): void {
       'Quote signed',
     );
 
+    const pythFeed = PYTH_FEED_IDS[asset];
+
     return reply.status(200).send({
       quote_id: quoteIdHex,
       floor_price_e6: floor_price_e6.toString(),
@@ -318,6 +332,9 @@ export function registerRiskQuoteRoutes(app: FastifyInstance): void {
       expires_at: Number(expiresAt),
       asset: nep141Asset,
       qty,
+      owner,
+      pyth_feed: pythFeed ? pythFeed.replace(/^0x/, '') : undefined,
+      key_id: 0,
     });
   });
 }

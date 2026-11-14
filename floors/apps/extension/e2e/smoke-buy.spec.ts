@@ -246,9 +246,9 @@ test.describe('smoke-buy: ETH with virtual WebAuthn (no mocks)', () => {
     // 5. Navigate to the ETH cashtag fixture page (via local HTTP server so content script matches)
     await page.goto(`http://localhost:${FIXTURE_SERVER_PORT}/post-with-eth.html`, { waitUntil: 'domcontentloaded' });
 
-    // 6. Wait for the floors-chip custom element (real content script injection)
-    await page.waitForSelector('floors-chip', { timeout: 8_000 });
-    const chip = page.locator('floors-chip').first();
+    // 6. Wait for the floors chip element (real content script injection)
+    await page.waitForSelector('[data-floors-chip]', { timeout: 8_000 });
+    const chip = page.locator('[data-floors-chip]').first();
     await expect(chip).toBeAttached();
 
     // 7. Start waiting for new page BEFORE clicking (avoids race where page opens faster than listener)

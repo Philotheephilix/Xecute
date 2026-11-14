@@ -120,3 +120,50 @@ html {
 .toast-exit {
   animation: toastSlideOut 0.3s ease-in forwards;
 }
+
+/* ── Bottom Navigation Bar ─────────────────────────────────────────────── */
+
+.bottom-nav {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 64px;
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  background-color: #FAF9F6;
+  border-top: 2px solid #111;
+  box-shadow: 0px -2px 0px #111;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+}
+
+/* ── Tab Content Area ──────────────────────────────────────────────────── */
+
+.tab-content {
+  position: absolute;
+  inset: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-bottom: calc(64px + env(safe-area-inset-bottom, 0px));
+  background-color: #FAF9F6;
+}
+
+/* ── Sub-screen Transitions ────────────────────────────────────────────── */
+
+.sub-screen-enter {
+  transform: translateX(100%);
+  opacity: 1;
+}
+.sub-screen-active {
+  transform: translateX(0%);
+  opacity: 1;
+  z-index: 20;
+  transition: transform 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.sub-screen-exit {
+  transform: translateX(100%);
+  opacity: 1;
+  transition: transform 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+}

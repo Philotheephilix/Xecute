@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import type { Screen, AccountState } from '../App';
 
 interface Props {
@@ -14,6 +14,8 @@ function truncateAddress(addr: string): string {
 }
 
 export default function AccountReady({ navigate, account, className }: Props) {
+  const [copied, setCopied] = useState(false);
+
   useEffect(() => {
     if (!account) navigate('welcome');
   }, [account, navigate]);
@@ -21,6 +23,24 @@ export default function AccountReady({ navigate, account, className }: Props) {
   if (!account) return null;
 
   const accountId = account.accountId;
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(accountId);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // Fallback for older browsers
+      const el = document.createElement('textarea');
+      el.value = accountId;
+      document.body.appendChild(el);
+      el.select();
+      document.execCommand('copy');
+      document.body.removeChild(el);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    }
+  };
 
   return (
     <div className={className}>
@@ -63,9 +83,30 @@ export default function AccountReady({ navigate, account, className }: Props) {
         {/* Account ID card */}
         <div className="bg-white border-2 border-[#111] rounded-[18px] shadow-neo-sm p-4">
           <p className="text-xs font-extrabold text-gray-500 mb-1">WALLET ADDRESS</p>
-          <p className="font-mono text-base font-bold text-[#111] break-all">
-            {truncateAddress(accountId)}
-          </p>
+          <div className="flex items-center gap-2">
+            <p className="font-mono text-base font-bold text-[#111] break-all flex-1">
+              {truncateAddress(accountId)}
+            </p>
+            <button
+              onClick={handleCopy}
+              className="shrink-0 w-8 h-8 bg-white border-2 border-[#111] rounded-[8px] flex items-center justify-center hover:bg-gray-50 active:translate-y-[1px] transition-all"
+              aria-label="Copy address"
+            >
+              {copied ? (
+                <svg className="w-4 h-4 text-[#29CEB4]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
+              ) : (
+                <svg className="w-4 h-4 text-[#111]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                </svg>
+              )}
+            </button>
+          </div>
+          {copied && (
+            <p className="text-xs font-bold text-[#29CEB4] mt-1">Copied!</p>
+          )}
         </div>
 
         {/* Features list */}

@@ -16,12 +16,13 @@ interface Props {
 export default function CreatePasskey({ navigate, setAccount, account, className }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [passkeyName, setPasskeyName] = useState('');
 
   const handleCreate = async () => {
     setError(null);
     setLoading(true);
     try {
-      const { credentialId, publicKey, rawPublicKey } = await createPasskey();
+      const { credentialId, publicKey, rawPublicKey } = await createPasskey(passkeyName);
       const compressedKey = extractCompressedP256Key(rawPublicKey);
       const compressedKeyHex = toHex(compressedKey);
       const inviteCode = account?.inviteCode;
@@ -38,6 +39,20 @@ export default function CreatePasskey({ navigate, setAccount, account, className
       localStorage.setItem('floors:credential_id', newAccount.credentialId);
       localStorage.setItem('floors:public_key', newAccount.publicKey);
       localStorage.setItem('floors:compressed_key', newAccount.compressedKeyHex);
+      localStorage.setItem('floors:passkey_name', passkeyName.trim());
+
+      // Store multi-passkey registry
+      const existingRaw = localStorage.getItem('floors:passkeys');
+      const existing: Array<{ name: string; credentialId: string; createdAt: string }> = existingRaw
+        ? JSON.parse(existingRaw)
+        : [];
+      existing.push({
+        name: passkeyName.trim(),
+        credentialId,
+        createdAt: new Date().toISOString(),
+      });
+      localStorage.setItem('floors:passkeys', JSON.stringify(existing));
+
       navigate('creating-account');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Passkey creation failed');
@@ -118,10 +133,26 @@ export default function CreatePasskey({ navigate, setAccount, account, className
           </div>
         )}
 
-        <div className="mt-auto">
+        <div className="mt-auto flex flex-col gap-4">
+          {/* Passkey name input */}
+          <div>
+            <label htmlFor="passkey-name" className="block text-sm font-bold text-[#111] mb-2">
+              Name your passkey
+            </label>
+            <input
+              id="passkey-name"
+              type="text"
+              value={passkeyName}
+              onChange={(e) => setPasskeyName(e.target.value)}
+              placeholder='e.g. "My MacBook", "Work iPhone"'
+              className="w-full h-12 px-4 bg-white border-2 border-[#111] rounded-[13px] text-base font-semibold text-[#111] placeholder:text-gray-400 shadow-neo-sm focus:outline-none focus:ring-2 focus:ring-[#EF7B28] focus:ring-offset-1"
+              disabled={loading}
+            />
+          </div>
+
           <button
             onClick={handleCreate}
-            disabled={loading}
+            disabled={loading || passkeyName.trim().length === 0}
             className="w-full h-14 bg-[#EF7B28] text-white border-2 border-[#111] rounded-[13px] text-base font-extrabold shadow-neo shadow-neo-active disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2"
           >
             {loading ? (

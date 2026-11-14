@@ -7,7 +7,6 @@ import {
   createDb,
 } from '@floors/shared-server';
 import { z } from 'zod';
-import type { FastifyRequest, FastifyReply } from 'fastify';
 import PgBoss from 'pg-boss';
 
 const IndexerConfigSchema = BaseConfigSchema.extend({
@@ -27,15 +26,12 @@ const logger = createLogger({
 });
 
 const db = createDb(config.DATABASE_URL);
-const app = await createApp(config, logger);
-
-// Override ready route
-app.get('/ready', async (_request: FastifyRequest, reply: FastifyReply) => {
+const app = await createApp(config, logger, async () => {
   try {
     await db`SELECT 1`;
-    return reply.status(200).send({ status: 'ready' });
+    return { ready: true };
   } catch {
-    return reply.status(503).send({ status: 'not_ready', reason: 'db_unreachable' });
+    return { ready: false, reason: 'db_unreachable' };
   }
 });
 

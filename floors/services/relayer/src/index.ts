@@ -18,7 +18,15 @@ const RelayerConfigSchema = BaseConfigSchema.extend({
     .regex(/^[0-9a-f]{64}$/, 'must be 64 hex chars')
     .default('7c2023ca3e3c53bf2309f9654180c8c516fb36cce5a18da8577e83c8f63ffd6b'),
   FLOORS_CONTRACT: z.string().default('floors.floors-dev.testnet'),
+  RISK_SERVICE_URL: z.string().url().default('http://localhost:3003'),
+  PYTH_CONTRACT: z.string().default('pyth.floors-dev.testnet'),
+  PYTH_PRIVATE_KEY: z.string().optional(),
   ONE_CLICK_API_URL: z.string().url().default('https://1click.chaindefuser.com'),
+  // Ref Finance testnet swap config (used when NEAR_NETWORK_ID !== 'mainnet')
+  REF_FINANCE_CONTRACT: z.string().default('ref-finance-101.testnet'),
+  USDC_TOKEN: z.string().default('usdc.fakes.testnet'),
+  ETH_TOKEN: z.string().default('eth.fakes.testnet'),
+  SOL_TOKEN: z.string().default('sol.fakes.testnet'),
 });
 
 export type RelayerConfig = z.infer<typeof RelayerConfigSchema>;
@@ -92,3 +100,57 @@ const reconcileInterval = setInterval(async () => {
   }
 }, 5 * 60 * 1000);
 reconcileInterval.unref();
+
+// ---------------------------------------------------------------------------
+// Mock Pyth price refresh (testnet only): keep the mock oracle fresh so floor
+// opens don't fail due to stale price. Runs every 30 seconds.
+// ---------------------------------------------------------------------------
+
+const PYTH_ETH_FEED = 'ff61491a931112ddf1bd8147cd1b641375f79f5825126d665480874634fd0ace';
+const COINGECKO_PRICE_URL = 'https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd';
+
+const pythRefreshInterval = setInterval(async () => {
+  if (config.NEAR_NETWORK_ID === 'mainnet') return; // Only on testnet
+  try {
+    // Fetch real ETH price from CoinGecko
+    let priceE8 = 190000000000; // fallback $1900
+    try {
+      const cgRes = await fetch(COINGECKO_PRICE_URL);
+      if (cgRes.ok) {
+        const cgData = await cgRes.json() as { ethereum?: { usd?: number } };
+        if (cgData.ethereum?.usd) {
+          priceE8 = Math.round(cgData.ethereum.usd * 1e8);
+        }
+      }
+    } catch { /* use fallback */ }
+
+    // Use PYTH_PRIVATE_KEY if configured (mock Pyth admin may be a different account)
+    const { connect, keyStores, KeyPair: nearKeyPair } = await import('near-api-js');
+    const pythContract = config.PYTH_CONTRACT ?? 'pyth.floors-dev.testnet';
+    let pythSigner = await createSigningAccount(config);
+    if (config.PYTH_PRIVATE_KEY) {
+      const ks = new keyStores.InMemoryKeyStore();
+      const kp = nearKeyPair.fromString(config.PYTH_PRIVATE_KEY as Parameters<typeof nearKeyPair.fromString>[0]);
+      await ks.setKey(config.NEAR_NETWORK_ID, pythContract, kp);
+      const nearConn = await connect({ networkId: config.NEAR_NETWORK_ID, nodeUrl: config.NEAR_NODE_URL, keyStore: ks });
+      pythSigner = await nearConn.account(pythContract);
+    }
+    const publishTimeNs = Date.now() * 1000000; // ms to ns, safe for ~200 years
+    await pythSigner.functionCall({
+      contractId: pythContract,
+      methodName: 'set_price',
+      args: {
+        feed_id: PYTH_ETH_FEED,
+        price: priceE8,
+        expo: -8,
+        publish_time_ns: publishTimeNs,
+      },
+      gas: BigInt(30_000_000_000_000),
+      attachedDeposit: BigInt(0),
+    });
+    logger.info({ price: priceE8, event: 'pyth_refresh_done' }, 'Mock Pyth price refreshed');
+  } catch (e) {
+    logger.warn({ err: e, event: 'pyth_refresh_error' }, 'Mock Pyth refresh failed (non-fatal)');
+  }
+}, 30_000);
+pythRefreshInterval.unref();

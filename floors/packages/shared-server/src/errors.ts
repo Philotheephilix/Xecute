@@ -90,17 +90,40 @@ export function errorHandler(fastify: FastifyInstance): void {
         ? error.statusCode
         : 500;
 
+      // Extract a meaningful message — AggregateError (e.g. postgres ECONNREFUSED)
+      // has an empty .message but carries .errors[] with real details, and may also
+      // have a .code like 'ECONNREFUSED'.
+      let errMessage = error.message;
+      if (!errMessage && 'code' in error) {
+        const errCode = (error as unknown as Record<string, unknown>)['code'];
+        if (typeof errCode === 'string') {
+          errMessage = `Connection error (${errCode})`;
+        }
+      }
+      if (!errMessage && error instanceof AggregateError && error.errors?.length > 0) {
+        errMessage = error.errors.map((e: Error) => e.message || String(e)).join('; ');
+      }
+      if (!errMessage) {
+        errMessage = 'An unexpected error occurred';
+      }
+
+      // User-facing message: never expose raw DB / connection details
+      const isDbError = errMessage.includes('ECONNREFUSED') || errMessage.includes('Connection error') || errMessage.includes('connect ECONNREFUSED');
+      const userMessage = isDbError
+        ? 'Service temporarily unavailable. Please try again.'
+        : errMessage;
+
       const envelope: ErrorEnvelope = {
         error: {
           code: statusCode === 404 ? ERROR_CODES.NOT_FOUND : ERROR_CODES.INTERNAL_ERROR,
-          message: error.message ?? 'An unexpected error occurred',
+          message: userMessage,
           retryable: statusCode >= 500,
           details: {},
         },
       };
 
       if (statusCode >= 500) {
-        fastify.log.error({ err: error }, 'Unhandled error');
+        fastify.log.error({ err: error, errMessage }, 'Unhandled error');
       }
 
       void reply.status(statusCode).send(envelope);

@@ -1,0 +1,174 @@
+# Floors production stack — runs on the OCI workstation behind Caddy.
+# All services join the existing mcpnet network so Caddy can reach them.
+#
+# Usage:
+#   cd /home/ubuntu/projects/xecute/floors
+#   docker compose -f deploy/docker-compose.prod.yml up -d --build
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: xecute-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: floors
+      POSTGRES_PASSWORD: floors
+    volumes:
+      - xecute-pgdata:/var/lib/postgresql/data
+      - ./deploy/init-db.sh:/docker-entrypoint-initdb.d/init-db.sh:ro
+    networks:
+      - xecutenet
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U floors"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile
+    container_name: xecute-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      SERVICE: api
+      NODE_ENV: testnet
+      PORT: "3001"
+      SERVICE_NAME: api
+      DATABASE_URL: postgres://floors:floors@postgres:5432/floors_api
+      RELAYER_URL: http://relayer:3002
+      RISK_URL: http://risk:3003
+      NEAR_NETWORK_ID: testnet
+      NEAR_NODE_URL: https://rpc.testnet.fastnear.com
+      FLOORS_CONTRACT: floors-dev.testnet
+      USDC_CONTRACT: usdc.fakes.testnet
+      REF_FINANCE_CONTRACT: ref-finance-101.testnet
+      USDC_TOKEN: usdc.fakes.testnet
+      ETH_TOKEN: eth.fakes.testnet
+      SOL_TOKEN: sol.fakes.testnet
+    networks:
+      - xecutenet
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3001/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  relayer:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile
+    container_name: xecute-relayer
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      SERVICE: relayer
+      NODE_ENV: testnet
+      PORT: "3002"
+      SERVICE_NAME: relayer
+      DATABASE_URL: postgres://floors:floors@postgres:5432/floors_relayer
+      NEAR_NODE_URL: https://rpc.testnet.fastnear.com
+      NEAR_NETWORK_ID: testnet
+      NEAR_ACCOUNT_ID: floors-dev.testnet
+      NEAR_PRIVATE_KEY: ${NEAR_PRIVATE_KEY}
+      WALLET_CONTRACT_CODE_HASH: 0945dbdfca98628565f0ec5ae43e4ca3c7b92399a704457abcf034c460b12ffa
+      FLOORS_CONTRACT: floors-dev.testnet
+      RISK_SERVICE_URL: http://risk:3003
+      PYTH_PRIVATE_KEY: ${PYTH_PRIVATE_KEY:-}
+    networks:
+      - xecutenet
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3002/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  risk:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile
+    container_name: xecute-risk
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      SERVICE: risk
+      NODE_ENV: testnet
+      PORT: "3003"
+      SERVICE_NAME: risk
+      DATABASE_URL: postgres://floors:floors@postgres:5432/floors_risk
+      RISK_SIGNING_KEY_HEX: ${RISK_SIGNING_KEY_HEX}
+    networks:
+      - xecutenet
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3003/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  registry:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile
+    container_name: xecute-registry
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      SERVICE: registry
+      NODE_ENV: testnet
+      PORT: "3004"
+      SERVICE_NAME: registry
+      DATABASE_URL: postgres://floors:floors@postgres:5432/floors_registry
+    networks:
+      - xecutenet
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3004/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  indexer:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile
+    container_name: xecute-indexer
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      SERVICE: indexer
+      NODE_ENV: testnet
+      PORT: "3005"
+      SERVICE_NAME: indexer
+      DATABASE_URL: postgres://floors:floors@postgres:5432/floors_indexer
+      NEAR_NODE_URL: https://rpc.testnet.fastnear.com
+      NEAR_NETWORK_ID: testnet
+    networks:
+      - xecutenet
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3005/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+volumes:
+  xecute-pgdata:
+
+networks:
+  xecutenet:
+    name: mcpphilotheephilixin_mcpnet
+    external: true

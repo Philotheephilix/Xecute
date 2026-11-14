@@ -10,28 +10,42 @@ interface Props {
 }
 
 const FLOOR_OPTIONS = [
-  { label: 'OFF', bps: 0 },
-  { label: '5%', bps: 500 },
-  { label: '10%', bps: 1000 },
-  { label: '20%', bps: 2000 },
+  { label: '10% floor', bps: 1000 },
+  { label: '20% floor', bps: 2000 },
 ];
 
-const DURATION_OPTIONS = [
-  { label: '30 days', secs: 2592000 },
-  { label: '90 days', secs: 7776000 },
-  { label: '180 days', secs: 15552000 },
-];
+/** Slider range: 1 hour min, 2 days max (testnet) */
+const DURATION_MIN_SECS = 3600;
+const DURATION_MAX_SECS = 172800;
+const DURATION_DEFAULT_SECS = 86400;
+const SLIDER_STEPS = 48; // 1h granularity for 48 hours
+
+function sliderToSecs(val: number): number {
+  return Math.max(DURATION_MIN_SECS, Math.min(val * 3600, DURATION_MAX_SECS));
+}
+
+function secsToSlider(secs: number): number {
+  return Math.max(1, Math.min(Math.round(secs / 3600), SLIDER_STEPS));
+}
+
+function formatDurationLabel(secs: number): string {
+  const hours = Math.round(secs / 3600);
+  if (hours < 24) return hours === 1 ? '1 hour' : `${hours} hours`;
+  const days = hours / 24;
+  if (Number.isInteger(days)) return days === 1 ? '1 day' : `${days} days`;
+  return `${hours} hours`;
+}
 
 function estimateCostPct(bps: number, durationSecs: number): string {
   if (bps === 0) return '0';
-  const daysRatio = durationSecs / 15552000; // relative to 180d max
+  const daysRatio = durationSecs / (365 * 86400); // relative to 1 year
   const raw = (bps / 10000) * 0.3 * daysRatio * 100;
   return raw.toFixed(2);
 }
 
 export default function SetupDefaults({ navigate, className }: Props) {
-  const [selectedBps, setSelectedBps] = useState<number>(500);
-  const [selectedDuration, setSelectedDuration] = useState<number>(2592000);
+  const [selectedBps, setSelectedBps] = useState<number>(1000);
+  const [selectedDuration, setSelectedDuration] = useState<number>(DURATION_DEFAULT_SECS);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -101,7 +115,7 @@ export default function SetupDefaults({ navigate, className }: Props) {
           <p className="text-xs font-extrabold text-gray-500 uppercase tracking-wide mb-3">
             How much protection?
           </p>
-          <div className="grid grid-cols-4 gap-2">
+          <div className="grid grid-cols-2 gap-3">
             {FLOOR_OPTIONS.map(({ label, bps }) => (
               <button
                 key={bps}
@@ -120,27 +134,32 @@ export default function SetupDefaults({ navigate, className }: Props) {
           </div>
         </div>
 
-        {/* Duration selector */}
+        {/* Duration slider */}
         <div>
-          <p className="text-xs font-extrabold text-gray-500 uppercase tracking-wide mb-3">
-            How long?
-          </p>
-          <div className="grid grid-cols-3 gap-2">
-            {DURATION_OPTIONS.map(({ label, secs }) => (
-              <button
-                key={secs}
-                onClick={() => setSelectedDuration(secs)}
-                className={[
-                  'h-14 border-2 border-[#111] rounded-[13px] font-extrabold text-sm shadow-neo-active',
-                  selectedDuration === secs
-                    ? 'bg-[#29CEB4] text-white shadow-neo'
-                    : 'bg-white text-[#111] shadow-neo-sm',
-                ].join(' ')}
-                disabled={loading}
-              >
-                {label}
-              </button>
-            ))}
+          <div className="flex items-center justify-between mb-3">
+            <p className="text-xs font-extrabold text-gray-500 uppercase tracking-wide">
+              How long?
+            </p>
+            <span className="text-sm font-extrabold text-[#111]">
+              {formatDurationLabel(selectedDuration)}
+            </span>
+          </div>
+          <input
+            type="range"
+            min={1}
+            max={SLIDER_STEPS}
+            step={1}
+            value={secsToSlider(selectedDuration)}
+            onChange={(e) => setSelectedDuration(sliderToSecs(parseInt(e.target.value, 10)))}
+            className="w-full h-1.5 rounded-full appearance-none cursor-pointer accent-[#29CEB4]"
+            style={{
+              background: `linear-gradient(to right, #29CEB4 ${((secsToSlider(selectedDuration) - 1) / (SLIDER_STEPS - 1)) * 100}%, #e5e7eb ${((secsToSlider(selectedDuration) - 1) / (SLIDER_STEPS - 1)) * 100}%)`,
+            }}
+            disabled={loading}
+          />
+          <div className="flex justify-between mt-1">
+            <span className="text-[10px] font-semibold text-gray-400">1 hour</span>
+            <span className="text-[10px] font-semibold text-gray-400">2 days</span>
           </div>
         </div>
 

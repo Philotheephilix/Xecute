@@ -400,24 +400,43 @@ export function registerRelayRoutes(
   /**
    * POST /v1/relay/enable-trading
    *
-   * Calls w_execute_signed(msg, proof) on the user's smart account to add
-   * their P-256 public key to intents.near and register with passkeys-registry.near.
+   * Registers the user's public key with intents.near via a direct
+   * functionCall from the relayer account. Bypasses the wallet contract's
+   * w_execute_signed (which needs protocol >= 89) by calling intents.near
+   * directly — the relayer pays gas.
    */
+  const EnableTradingDirectSchema = z.object({
+    account_id: z.string().regex(/^0s[0-9a-f]{40}$/, 'must be a valid 0s... NEP-616 address'),
+    public_key: z.string().min(1),
+    idempotency_key: z.string().uuid(),
+  });
+
   app.post('/v1/relay/enable-trading', async (request, reply) => {
-    const bodyResult = EnableTradingBodySchema.safeParse(request.body);
-    if (!bodyResult.success) {
+    // Accept both old format (wallet_request_signed) and new direct format (public_key)
+    const directResult = EnableTradingDirectSchema.safeParse(request.body);
+    if (!directResult.success) {
+      const legacyResult = EnableTradingBodySchema.safeParse(request.body);
+      if (!legacyResult.success) {
+        throw new FloorApiError(
+          'VALIDATION_ERROR',
+          'Invalid enable-trading request',
+          false,
+          400,
+          { issues: directResult.error.issues },
+        );
+      }
+      // Legacy path — extract public_key from the wallet_request args
+      // For now, reject legacy format and require the direct format
       throw new FloorApiError(
         'VALIDATION_ERROR',
-        'Invalid enable-trading request',
+        'Use the direct format: {account_id, public_key, idempotency_key}',
         false,
         400,
-        { issues: bodyResult.error.issues },
       );
     }
 
-    const { account_id, wallet_request_signed, idempotency_key } = bodyResult.data;
+    const { account_id, public_key, idempotency_key } = directResult.data;
 
-    // Check idempotency
     const existing = await db<Array<{ tx_hash: string; status: string; result: unknown }>>`
       SELECT tx_hash, status, result FROM relayer.create_account_requests
       WHERE idempotency_key = ${idempotency_key}
@@ -427,35 +446,34 @@ export function registerRelayRoutes(
     }
 
     logger.info(
-      { account_id, event: 'enable_trading_start' },
-      'Calling w_execute_signed on wallet account',
+      { account_id, public_key: public_key.slice(0, 16), event: 'enable_trading_start' },
+      'Calling intents.near#add_public_key directly',
     );
 
-    // Call w_execute_signed on the smart account using near-api-js FunctionCall
-    // (this is a standard function call — no custom actions needed)
-    let tx_hash: string;
-    try {
-      const signingAccount = await getSigningAccount(config);
+    const intentsContract = config.NEAR_NETWORK_ID === 'mainnet' ? 'intents.near' : null;
 
-      const outcome = await signingAccount.functionCall({
-        contractId: account_id,
-        methodName: 'w_execute_signed',
-        args: {
-          msg: wallet_request_signed.msg,
-          proof: wallet_request_signed.proof,
-        },
-        gas: BigInt(30_000_000_000_000), // 30 TGas
-        attachedDeposit: BigInt(0),
-      });
+    let tx_hash: string | null = null;
 
-      tx_hash = outcome.transaction_outcome.id;
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      logger.error({ err, account_id, event: 'enable_trading_error' }, 'w_execute_signed failed');
-      throw new FloorApiError('RELAYER_ERROR', `w_execute_signed failed: ${msg}`, true, 502);
+    if (intentsContract) {
+      try {
+        const signingAccount = await getSigningAccount(config);
+        const outcome = await signingAccount.functionCall({
+          contractId: intentsContract,
+          methodName: 'add_public_key',
+          args: { public_key },
+          gas: BigInt(30_000_000_000_000),
+          attachedDeposit: BigInt(1),
+        });
+        tx_hash = outcome.transaction_outcome.id;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        logger.error({ err, account_id, event: 'enable_trading_error' }, 'add_public_key failed');
+        throw new FloorApiError('RELAYER_ERROR', `add_public_key failed: ${msg}`, true, 502);
+      }
+      logger.info({ tx_hash, account_id, event: 'trading_enabled' }, 'Public key registered on intents');
+    } else {
+      logger.info({ account_id, event: 'trading_enabled_testnet' }, 'Testnet: intents registration skipped (no intents contract)');
     }
-
-    logger.info({ tx_hash, account_id, event: 'trading_enabled' }, 'Trading enabled for account');
 
     const responseBody = { tx_hash, status: 'success' as const };
 
@@ -588,6 +606,56 @@ export function registerRelayRoutes(
 
     logger.info({ tx_hash, account_id, floor_id, action, event: 'floor_action_done' }, 'Floor action submitted');
     return reply.status(200).send({ tx_hash, status: 'success' });
+  });
+
+  /**
+   * POST /v1/relay/floor-action-auth
+   *
+   * Execute a floor action (sell_to_floor, close) via the on_auth path.
+   * The relayer (floors-dev.testnet) calls on_auth on the floors contract
+   * as the intents contract, passing the user's signer_id.
+   *
+   * No wallet signing required — the relayer IS the intents contract on testnet.
+   */
+  const FloorActionAuthBodySchema = z.object({
+    account_id: z.string().min(1),
+    floor_id: z.number().int().nonnegative(),
+    action: z.enum(['sell_to_floor', 'close']),
+  });
+
+  app.post('/v1/relay/floor-action-auth', async (request, reply) => {
+    const bodyResult = FloorActionAuthBodySchema.safeParse(request.body);
+    if (!bodyResult.success) {
+      throw new FloorApiError('VALIDATION_ERROR', 'Invalid floor-action-auth request', false, 400, { issues: bodyResult.error.issues });
+    }
+
+    const { account_id, floor_id, action } = bodyResult.data;
+    const floorsContract = config.FLOORS_CONTRACT;
+
+    logger.info({ account_id, floor_id, action, floorsContract, event: 'floor_action_auth_start' }, 'Floor action via on_auth');
+
+    let tx_hash: string;
+    try {
+      const signingAccount = await getSigningAccount(config);
+      const outcome = await signingAccount.functionCall({
+        contractId: floorsContract,
+        methodName: 'on_auth',
+        args: {
+          signer_id: account_id,
+          msg: JSON.stringify({ op: action, floor_id }),
+        },
+        gas: BigInt(100_000_000_000_000), // 100 TGas (cross-contract calls inside)
+        attachedDeposit: BigInt(0),
+      });
+      tx_hash = outcome.transaction_outcome.id;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.error({ err, account_id, floor_id, action, event: 'floor_action_auth_error' }, 'on_auth call failed');
+      throw new FloorApiError('RELAYER_ERROR', `on_auth failed: ${msg}`, true, 502);
+    }
+
+    logger.info({ tx_hash, account_id, floor_id, action, event: 'floor_action_auth_done' }, 'Floor action via on_auth submitted');
+    return reply.status(200).send({ tx_hash, status: 'success', action, floor_id });
   });
 
   /**

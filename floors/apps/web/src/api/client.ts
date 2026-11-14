@@ -1,12 +1,20 @@
 import { z } from 'zod';
 
-const BASE_URL = (import.meta as ImportMeta & { env: Record<string, string> }).env['VITE_API_URL'] ?? 'http://localhost:3001';
-const RELAYER_URL = (import.meta as ImportMeta & { env: Record<string, string> }).env['VITE_RELAYER_URL'] ?? 'http://localhost:3002';
+const BASE_URL = (import.meta as ImportMeta & { env: Record<string, string> }).env['VITE_API_URL'] ?? '';
+const RELAYER_URL = (import.meta as ImportMeta & { env: Record<string, string> }).env['VITE_RELAYER_URL'] ?? '';
 
 // ── Zod schemas ─────────────────────────────────────────────────────────────
 
 const ErrorEnvelopeSchema = z.object({
-  error: z.string(),
+  error: z.union([
+    z.string(),
+    z.object({
+      code: z.string().optional(),
+      message: z.string(),
+      retryable: z.boolean().optional(),
+      details: z.unknown().optional(),
+    }),
+  ]),
   code: z.string().optional(),
 });
 
@@ -27,7 +35,7 @@ const AccountSchema = z.object({
 });
 
 const EnableTradingResponseSchema = z.object({
-  tx_hash: z.string(),
+  tx_hash: z.string().nullable(),
 });
 
 const EnableTradingRequestSchema = z.object({
@@ -58,6 +66,7 @@ const PositionRawSchema = z.object({
 const PositionsResponseSchema = z.object({
   positions: z.array(PositionRawSchema),
   near_balance: z.string().optional(),
+  usdc_balance: z.string().nullable().optional(),
 });
 
 const SuggestionsSchema = z.object({
@@ -74,6 +83,69 @@ const ActionSubmitResponseSchema = z.object({
   status_id: z.string(),
 });
 
+const PortfolioHistoryPointSchema = z.object({
+  t: z.number(),
+  v: z.number(),
+});
+
+const PositionPnLSchema = z.object({
+  floor_id: z.string(),
+  asset: z.string(),
+  qty: z.string(),
+  entry_price: z.number(),
+  current_price: z.number(),
+  floor_price: z.number(),
+  pnl_usd: z.number(),
+  pnl_pct: z.number(),
+  protected: z.boolean(),
+});
+
+const PortfolioHistoryResponseSchema = z.object({
+  points: z.array(PortfolioHistoryPointSchema),
+  current_value: z.number(),
+  usdc_value: z.number().optional(),
+  position_value: z.number().optional(),
+  positions_pnl: z.array(PositionPnLSchema).optional(),
+  change_24h: z.number(),
+  change_pct_24h: z.number(),
+});
+
+// ── Activity schemas ────────────────────────────────────────────────────────
+
+const ActivityActionSchema = z.object({
+  action: z.string(),
+  method: z.string().nullable(),
+});
+
+const ActivityTransactionSchema = z.object({
+  tx_hash: z.string(),
+  receipt_id: z.string(),
+  type: z.string(),
+  method: z.string().nullable(),
+  label: z.string(),
+  receiver: z.string(),
+  predecessor: z.string(),
+  timestamp: z.string(),
+  status: z.string(),
+  deposit: z.string(),
+  icon_type: z.string(),
+  actions: z.array(ActivityActionSchema),
+});
+
+const ActivityBuySubmissionSchema = z.object({
+  status_id: z.string(),
+  ticker: z.string(),
+  amount_usdc: z.string(),
+  tx_hash: z.string().nullable(),
+  status: z.string(),
+  created_at: z.string(),
+});
+
+const ActivityResponseSchema = z.object({
+  transactions: z.array(ActivityTransactionSchema),
+  buy_submissions: z.array(ActivityBuySubmissionSchema),
+});
+
 // ── Public types ─────────────────────────────────────────────────────────────
 
 export interface Position {
@@ -85,8 +157,46 @@ export interface Position {
   status: 'active' | 'expired' | 'closed';
 }
 
+export interface PortfolioHistoryPoint {
+  /** Unix timestamp in seconds */
+  t: number;
+  /** Portfolio value in USD */
+  v: number;
+}
+
+export interface PositionPnL {
+  floor_id: string;
+  asset: string;
+  qty: string;
+  entry_price: number;
+  current_price: number;
+  floor_price: number;
+  pnl_usd: number;
+  pnl_pct: number;
+  protected: boolean;
+}
+
+export interface PortfolioHistory {
+  points: PortfolioHistoryPoint[];
+  current_value: number;
+  /** USDC balance portion of current_value */
+  usdc_value?: number | undefined;
+  /** Position value portion (sum of qty * current_price for all active floors) */
+  position_value?: number | undefined;
+  /** Per-position PnL breakdown */
+  positions_pnl?: PositionPnL[] | undefined;
+  change_24h: number;
+  change_pct_24h: number;
+}
+
 export type Account = z.infer<typeof AccountSchema>;
 export type DepositAddress = z.infer<typeof DepositAddressSchema>;
+export type ActivityTransaction = z.infer<typeof ActivityTransactionSchema>;
+export type ActivityBuySubmission = z.infer<typeof ActivityBuySubmissionSchema>;
+export interface ActivityResponse {
+  transactions: ActivityTransaction[];
+  buy_submissions: ActivityBuySubmission[];
+}
 
 // ── Utilities ────────────────────────────────────────────────────────────────
 
@@ -110,8 +220,18 @@ async function parseResponse<T>(res: Response, schema: z.ZodType<T>): Promise<T>
 
   if (!res.ok) {
     const parsed = ErrorEnvelopeSchema.safeParse(json);
-    const message = parsed.success ? parsed.data.error : `HTTP ${res.status}`;
-    const code = parsed.success ? parsed.data.code : undefined;
+    let message = `HTTP ${res.status}`;
+    let code: string | undefined;
+    if (parsed.success) {
+      const err = parsed.data.error;
+      if (typeof err === 'string') {
+        message = err;
+        code = parsed.data.code;
+      } else {
+        message = err.message;
+        code = err.code;
+      }
+    }
     throw new ApiError(message, res.status, code);
   }
 
@@ -184,6 +304,7 @@ export async function getEnableTradingRequest(accountId: string): Promise<{ wall
     res = await fetch(`${BASE_URL}/v1/accounts/${encodeURIComponent(accountId)}/enable-trading-request`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
     });
   } catch (err) {
     console.warn('[floors] enable-trading-request fetch failed (network error):', err);
@@ -199,24 +320,19 @@ export async function getEnableTradingRequest(accountId: string): Promise<{ wall
 }
 
 /**
- * Submit a signed wallet request to the relayer to enable trading.
- * Called against the relayer (port 3002).
+ * Register the user's public key with intents.near via the relayer.
+ * Direct RPC call — no wallet contract signature needed.
  */
 export async function enableTrading(
   accountId: string,
-  assertion: { signature: string; credential_id: string; wallet_request: unknown },
-): Promise<{ tx_hash: string }> {
+  publicKey: string,
+): Promise<{ tx_hash: string | null }> {
   const res = await fetch(`${RELAYER_URL}/v1/relay/enable-trading`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       account_id: accountId,
-      wallet_request_signed: {
-        msg: JSON.stringify(assertion.wallet_request),
-        proof: assertion.signature,
-      },
+      public_key: publicKey,
       idempotency_key: crypto.randomUUID(),
     }),
   });
@@ -250,9 +366,9 @@ export async function getDepositAddresses(accountId: string): Promise<DepositAdd
 
 /**
  * Get floor positions for an account.
- * H1: Returns { positions, near_balance } — near_balance is the on-chain NEAR balance.
+ * Returns { positions, near_balance, usdc_balance } from the API.
  */
-export async function getPositions(accountId: string): Promise<{ positions: Position[]; near_balance: string | null }> {
+export async function getPositions(accountId: string): Promise<{ positions: Position[]; near_balance: string | null; usdc_balance: string | null }> {
   let res: Response;
   try {
     res = await fetch(`${BASE_URL}/v1/accounts/${encodeURIComponent(accountId)}/positions`, {
@@ -260,12 +376,12 @@ export async function getPositions(accountId: string): Promise<{ positions: Posi
     });
   } catch (err) {
     console.warn('[floors] positions fetch failed (network error):', err);
-    return { positions: [], near_balance: null };
+    return { positions: [], near_balance: null, usdc_balance: null };
   }
 
   if (res.status === 404 || res.status === 501) {
     console.warn('[floors] positions endpoint not yet implemented (status', res.status, ')');
-    return { positions: [], near_balance: null };
+    return { positions: [], near_balance: null, usdc_balance: null };
   }
 
   const result = await parseResponse(res, PositionsResponseSchema);
@@ -282,7 +398,30 @@ export async function getPositions(accountId: string): Promise<{ positions: Posi
     if (p.expires_at !== undefined && pos.protected_until === undefined) pos.protected_until = p.expires_at;
     return pos;
   });
-  return { positions, near_balance: result.near_balance ?? null };
+  return { positions, near_balance: result.near_balance ?? null, usdc_balance: result.usdc_balance ?? null };
+}
+
+/**
+ * Fetch recent activity (on-chain txns + buy submissions) for an account.
+ * Returns empty arrays on network error or 404.
+ */
+export async function getActivity(accountId: string): Promise<ActivityResponse> {
+  let res: Response;
+  try {
+    res = await fetch(`${BASE_URL}/v1/accounts/${encodeURIComponent(accountId)}/activity`, {
+      headers: { 'Content-Type': 'application/json' },
+    });
+  } catch (err) {
+    console.warn('[floors] activity fetch failed (network error):', err);
+    return { transactions: [], buy_submissions: [] };
+  }
+
+  if (res.status === 404 || res.status === 501) {
+    console.warn('[floors] activity endpoint not available (status', res.status, ')');
+    return { transactions: [], buy_submissions: [] };
+  }
+
+  return parseResponse(res, ActivityResponseSchema);
 }
 
 /**
@@ -294,7 +433,7 @@ export async function getSuggestions(): Promise<{ floor_bps: number; duration_se
   try {
     res = await fetch(`${BASE_URL}/v1/suggestions`);
   } catch {
-    return { floor_bps: 500, duration_secs: 2592000 };
+    return { floor_bps: 1000, duration_secs: 86400 };
   }
   if (!res.ok) return { floor_bps: 500, duration_secs: 2592000 };
   return parseResponse(res, SuggestionsSchema);
@@ -310,11 +449,11 @@ export async function getActionChallenge(
   floorId: string,
 ): Promise<{ wallet_request: unknown; challenge: string }> {
   const res = await fetch(
-    `${BASE_URL}/v1/accounts/${encodeURIComponent(accountId)}/actions`,
+    `${BASE_URL}/v1/actions/challenge`,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action, floor_id: floorId }),
+      body: JSON.stringify({ action, floor_id: floorId, account_id: accountId }),
     },
   );
   return parseResponse(res, ActionChallengeResponseSchema);
@@ -349,6 +488,30 @@ export async function submitAction(params: {
   });
   await parseResponse(res, ActionSubmitResponseSchema);
   return { ok: true };
+}
+
+/**
+ * Fetch portfolio value history for an account.
+ * Returns { points, current_value, change_24h, change_pct_24h }.
+ * Returns null on network error or if the endpoint is not yet deployed.
+ */
+export async function getPortfolioHistory(accountId: string): Promise<PortfolioHistory | null> {
+  let res: Response;
+  try {
+    res = await fetch(`${BASE_URL}/v1/accounts/${encodeURIComponent(accountId)}/portfolio-history`, {
+      headers: { 'Content-Type': 'application/json' },
+    });
+  } catch (err) {
+    console.warn('[floors] portfolio-history fetch failed (network error):', err);
+    return null;
+  }
+
+  if (res.status === 404 || res.status === 501) {
+    console.warn('[floors] portfolio-history endpoint not yet implemented (status', res.status, ')');
+    return null;
+  }
+
+  return parseResponse(res, PortfolioHistoryResponseSchema);
 }
 
 function fallbackDepositAddresses(accountId: string): DepositAddress[] {

@@ -446,14 +446,14 @@ test.describe('full-buy-flow: web app shows floor quote in extension sheet', () 
       // Navigate to web app
       await page.goto('/');
       await page.waitForLoadState('load');
-      await expect(page.locator('h1').filter({ hasText: 'Floors' })).toBeVisible({ timeout: 10_000 });
+      await expect(page.getByRole('button', { name: 'Get Started' })).toBeVisible({ timeout: 10_000 });
 
       // Set up virtual WebAuthn BEFORE clicking Get Started
       await setupVirtualAuthenticator(page);
 
       // Get Started → Create Passkey screen
       await page.getByRole('button', { name: 'Get Started' }).click();
-      await expect(page.getByText('Secure Your Account')).toBeVisible({ timeout: 5_000 });
+      await expect(page.getByText('Create Your Passkey')).toBeVisible({ timeout: 5_000 });
 
       // Pre-flight: check DB before attempting account creation
       const dbUp = await isDbReachable();
@@ -476,7 +476,7 @@ test.describe('full-buy-flow: web app shows floor quote in extension sheet', () 
         expect(quoteBody.quote?.floor_price_e6, 'Floor quote should have floor_price_e6').toBeDefined();
         console.log(`[p2] Floor quote verified independently: floor_price_e6=${quoteBody.quote?.floor_price_e6}`);
         // Still verify the passkey screen is showing (can't proceed without DB)
-        await expect(page.getByText('Secure Your Account')).toBeVisible({ timeout: 5_000 });
+        await expect(page.getByText('Create Your Passkey')).toBeVisible({ timeout: 5_000 });
         return;
       }
 
@@ -487,7 +487,7 @@ test.describe('full-buy-flow: web app shows floor quote in extension sheet', () 
       await expect(page.getByText('Setting up your account')).toBeVisible({ timeout: 10_000 });
 
       // DB is up — wait for Account Ready
-      await expect(page.getByText('Account Ready!')).toBeVisible({ timeout: 35_000 });
+      await expect(page.getByText('Wallet Created')).toBeVisible({ timeout: 35_000 });
 
       // Check that POST /v1/accounts was called successfully
       const createCall = apiResponses.find((r) => r.url.includes('/v1/accounts') && r.status >= 200 && r.status < 300);

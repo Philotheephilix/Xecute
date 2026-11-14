@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>X Timeline (v2 DOM) — Floors Fixture</title>
+    <style>
+      body { font-family: -apple-system, sans-serif; background: #000; margin: 0; padding: 16px; color: #e7e9ea; }
+      article { border-bottom: 1px solid #2f3336; padding: 12px 16px; max-width: 600px; }
+      .tweet-text { font-size: 15px; line-height: 1.4; }
+      .tweet-text a { color: #1d9bf0; text-decoration: none; }
+    </style>
+  </head>
+  <body>
+    <!--
+      Mimics X.com's CURRENT DOM (2024+):
+      - article with role="article"
+      - Cashtags as plain <span> with "$ETH" text (no wrapping <a>)
+      - Or <span> inside <a> with generic href
+      - Mixed case: "$Btc", "$eth", "$SOL"
+    -->
+
+    <!-- Tweet 1: ETH cashtag as span inside link (no cashtag_click) -->
+    <article role="article" tabindex="0">
+      <div class="tweet-text">
+        <span>Staking rewards are stacking.</span>
+        <a role="link"><span>$ETH</span></a>
+        <span>to $10k EOY? Let's go</span>
+      </div>
+      <a href="/user/status/2001" style="display:none;">status link</a>
+    </article>
+
+    <!-- Tweet 2: SOL cashtag as plain span (no wrapping link) -->
+    <article role="article" tabindex="0">
+      <div class="tweet-text">
+        <span>NFT floor prices on</span>
+        <span>$SOL</span>
+        <span>are recovering fast.</span>
+      </div>
+      <a href="/user/status/2002" style="display:none;">status link</a>
+    </article>
+
+    <!-- Tweet 3: no cashtag -->
+    <article role="article" tabindex="0">
+      <div class="tweet-text">
+        <span>The macro picture is actually not that bad if you zoom out.</span>
+      </div>
+    </article>
+
+    <!-- Tweet 4: Mixed case cashtags as span elements -->
+    <article role="article" tabindex="0">
+      <div class="tweet-text">
+        <span>Portfolio update:</span>
+        <span>$BTC</span>
+        <span>and</span>
+        <span>$ETH</span>
+        <span>holding strong.</span>
+      </div>
+      <a href="/user/status/2004" style="display:none;">status link</a>
+    </article>
+  </body>
+</html>

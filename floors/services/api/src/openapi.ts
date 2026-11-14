@@ -12,7 +12,7 @@ const QuoteRequestSchema = z.object({
   asset: z.string().min(1),
   qty: z.string().min(1),
   floor_bps: z.number().int().min(100).max(5000),
-  duration_secs: z.number().int().min(86400).max(31536000),
+  duration_secs: z.number().int().min(3600).max(31536000),
 });
 
 const BuyBodySchema = z.object({
@@ -47,7 +47,10 @@ const openapi = {
     version: '0.0.1',
     description: 'Floors on-chain floor price protection API',
   },
-  servers: [{ url: 'http://localhost:3001', description: 'Local' }],
+  servers: [
+    { url: 'https://mcp.philotheephilix.in/projects/xecute/api', description: 'Production' },
+    { url: 'http://localhost:3001', description: 'Local' },
+  ],
   paths: {
     '/v1/accounts': {
       post: {

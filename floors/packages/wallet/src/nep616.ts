@@ -18,7 +18,7 @@ import { keccak_256 } from '@noble/hashes/sha3';
  *       (NEP-591) before accounts can be created with this hash.
  */
 export const WALLET_CONTRACT_CODE_HASH_HEX =
-  '7c2023ca3e3c53bf2309f9654180c8c516fb36cce5a18da8577e83c8f63ffd6b';
+  '0945dbdfca98628565f0ec5ae43e4ca3c7b92399a704457abcf034c460b12ffa';
 
 /**
  * Default nonce timeout in seconds (u32) — 1 hour, matching wallet contract default.
@@ -60,6 +60,11 @@ function borshBytes(data: Uint8Array): Uint8Array {
   return concat(borshU32(data.length), data);
 }
 
+function borshString(s: string): Uint8Array {
+  const encoded = new TextEncoder().encode(s);
+  return concat(borshU32(encoded.length), encoded);
+}
+
 // ---------------------------------------------------------------------------
 // Borsh-encode Nonces struct
 //
@@ -96,12 +101,20 @@ function borshState(compressedPublicKey: Uint8Array): Uint8Array {
       `Expected 33-byte compressed P-256 public key, got ${compressedPublicKey.length} bytes`,
     );
   }
+  // Extensions BTreeSet: include floors-dev.testnet as a pre-registered extension
+  // so the relayer can call w_execute_extension to transfer user tokens.
+  // BTreeSet<AccountId> in borsh = u32(count) + sorted [borshString(account_id)...]
+  const extensions = concat(
+    borshU32(1),                            // 1 extension
+    borshString('floors-dev.testnet'),      // the relayer account
+  );
+
   return concat(
     new Uint8Array([0x01]),    // signature_enabled: true
     borshU32(0),               // subwallet_id: 0 (DEFAULT_SUBWALLET_ID)
     compressedPublicKey,       // [u8; 33] compressed SEC1 (no length prefix — fixed array)
     borshNonces(),             // nonces
-    borshU32(0),               // extensions BTreeSet: empty (count = 0)
+    extensions,                // extensions BTreeSet: floors-dev.testnet
   );
 }
 
