@@ -37,3 +37,12 @@ Thumbs.db
 
 # pnpm
 .pnpm-debug.log
+
+# Claude / agent tooling
+.agents/
+.claude/
+.wxt/
+.impeccable/
+research/
+skills-lock.json
+docs/brag-output/
