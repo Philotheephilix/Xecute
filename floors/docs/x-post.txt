@@ -1,0 +1,15 @@
+=== MAIN TWEET (attach demo video) ===
+Built Xecute at the @NEARProtocol hackathon. Buy crypto straight from X posts — with a guaranteed floor price. No CEX, no seed phrases. Just tap, Face ID, done.
+
+github.com/Philotheephilix/Xecute
+
+#NEARHackathon
+
+=== THREAD ===
+1/ See a $ETH cashtag in your feed? Our Chrome extension drops a Buy chip right there. Tap it, pick your floor (say 95%), confirm with your fingerprint. One signature. Token lands in your NEAR wallet in seconds.
+
+2/ The floor isn't a stop-loss. It's a smart contract. If the price tanks below your floor, the contract pays the difference. You keep all the upside. Downside is capped. That's the whole idea.
+
+3/ Stack: passkey wallets (WebAuthn), Pyth oracles, Ref Finance swaps, Rust smart contract on NEAR testnet. All open source. Go try it, go break it.
+
+github.com/Philotheephilix/Xecute
