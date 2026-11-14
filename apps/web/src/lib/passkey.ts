@@ -194,11 +194,11 @@ export interface PasskeyAssertion {
 // ── Create passkey ───────────────────────────────────────────────────────────
 
 export async function createPasskey(name?: string): Promise<PasskeyCreationResult> {
-  const displayName = name?.trim() || 'Floors User';
+  const displayName = name?.trim() || 'Xecute User';
   const credential = await navigator.credentials.create({
     publicKey: {
       rp: {
-        name: 'Floors',
+        name: 'Xecute',
         id: window.location.hostname,
       },
       user: {

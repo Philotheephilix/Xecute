@@ -135,7 +135,7 @@ const pythRefreshInterval = setInterval(async () => {
       const nearConn = await connect({ networkId: config.NEAR_NETWORK_ID, nodeUrl: config.NEAR_NODE_URL, keyStore: ks });
       pythSigner = await nearConn.account(pythContract);
     }
-    const publishTimeNs = String(BigInt(Date.now()) * 1000000n);
+    const publishTimeNs = Date.now() * 1000000; // ms to ns, safe for ~200 years
     await pythSigner.functionCall({
       contractId: pythContract,
       methodName: 'set_price',

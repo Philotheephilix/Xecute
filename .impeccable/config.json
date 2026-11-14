@@ -6,7 +6,137 @@
       {
         "rule": "overused-font",
         "value": "plus jakarta sans",
-        "createdAt": "2026-11-13T12:08:35.161Z"
+        "createdAt": "2026-11-13T12:08:35.161Z",
+        "reason": "Plus Jakarta Sans is Xecute's brand font per brand/ guidelines"
+      },
+      {
+        "rule": "side-tab",
+        "value": "*",
+        "files": [
+          "docs/brag-output/composition/scenes/scene4-flex.html"
+        ],
+        "createdAt": "2026-11-14T14:41:26.304Z",
+        "reason": "video composition: matches project design system teal accent border"
+      },
+      {
+        "rule": "bounce-easing",
+        "value": "cubic-bezier(0.34, 1.56, 0.64, 1)",
+        "createdAt": "2026-11-14T14:41:26.345Z",
+        "reason": "intentional cinematic bounce for video composition"
+      },
+      {
+        "rule": "bounce-easing",
+        "value": "bounceflash",
+        "createdAt": "2026-11-14T14:41:26.376Z",
+        "reason": "intentional cinematic flash for video composition"
+      },
+      {
+        "rule": "cramped-padding",
+        "value": "*",
+        "files": [
+          "docs/brag-output/composition/scenes/scene4-flex.html"
+        ],
+        "createdAt": "2026-11-14T14:41:26.412Z",
+        "reason": "video frame layout, not interactive UI"
+      },
+      {
+        "rule": "side-tab",
+        "value": "*",
+        "files": [
+          "docs/brag-output/composition/scenes/scene2-reveal.html"
+        ],
+        "createdAt": "2026-11-14T14:41:26.474Z",
+        "reason": "video composition"
+      },
+      {
+        "rule": "bounce-easing",
+        "value": "*",
+        "files": [
+          "docs/brag-output/composition/scenes/scene2-reveal.html"
+        ],
+        "createdAt": "2026-11-14T14:41:26.504Z",
+        "reason": "intentional cinematic motion"
+      },
+      {
+        "rule": "side-tab",
+        "value": "*",
+        "files": [
+          "docs/brag-output/composition/index.html"
+        ],
+        "createdAt": "2026-11-14T14:41:26.537Z",
+        "reason": "video composition: project design system"
+      },
+      {
+        "rule": "bounce-easing",
+        "value": "*",
+        "files": [
+          "docs/brag-output/composition/index.html"
+        ],
+        "createdAt": "2026-11-14T14:41:26.571Z",
+        "reason": "intentional cinematic motion"
+      },
+      {
+        "rule": "*",
+        "value": "*",
+        "files": [
+          "docs/brag-output/composition/scenes/scene1-crash.html"
+        ],
+        "createdAt": "2026-11-14T14:41:26.613Z",
+        "reason": "video composition frame, not product UI"
+      },
+      {
+        "rule": "*",
+        "value": "*",
+        "files": [
+          "docs/brag-output/composition/scenes/scene3a-chip.html"
+        ],
+        "createdAt": "2026-11-14T14:41:26.656Z",
+        "reason": "video composition frame, not product UI"
+      },
+      {
+        "rule": "*",
+        "value": "*",
+        "files": [
+          "docs/brag-output/composition/scenes/scene3b-buysheet.html"
+        ],
+        "createdAt": "2026-11-14T14:41:26.700Z",
+        "reason": "video composition frame, not product UI"
+      },
+      {
+        "rule": "*",
+        "value": "*",
+        "files": [
+          "docs/brag-output/composition/scenes/scene3c-confirm.html"
+        ],
+        "createdAt": "2026-11-14T14:41:26.746Z",
+        "reason": "video composition frame, not product UI"
+      },
+      {
+        "rule": "*",
+        "value": "*",
+        "files": [
+          "docs/brag-output/composition/scenes/scene5-logo.html"
+        ],
+        "createdAt": "2026-11-14T14:41:26.782Z",
+        "reason": "video composition frame, not product UI"
+      },
+      {
+        "rule": "dark-glow",
+        "value": "*",
+        "files": [
+          "docs/brag-output/composition/index.html"
+        ],
+        "createdAt": "2026-11-14T15:03:54.791Z",
+        "reason": "video composition: cinematic glow effects are intentional"
+      },
+      {
+        "rule": "clipped-overflow-container",
+        "value": "*",
+        "files": [
+          "docs/brag-output/composition/index.html"
+        ],
+        "createdAt": "2026-11-14T15:03:54.839Z",
+        "reason": "video frame, not interactive UI"
       }
     ]
   }

@@ -22,7 +22,7 @@ const ASSET_IDS: Record<string, string> = {
 // ---------------------------------------------------------------------------
 
 const REF_POOL_IDS: Record<string, number> = {
-  ETH: 365,
+  ETH: 2980,
   SOL: -1, // SOL pool not yet deployed on testnet Ref Finance
   BTC: -1, // BTC pool not yet deployed on testnet Ref Finance
 };

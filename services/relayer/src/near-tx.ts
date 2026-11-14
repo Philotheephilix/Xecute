@@ -351,11 +351,19 @@ export function encodeWalletStateForP256(compressedPublicKey: Uint8Array): Uint8
     u32le(0),                    // current BTreeMap: empty
   );
 
+  // Extensions BTreeSet: include floors-dev.testnet as a pre-registered extension
+  // so the relayer can call w_execute_extension to transfer user tokens.
+  // BTreeSet<AccountId> in borsh = u32(count) + sorted [borshString(account_id)...]
+  const extensions = concat(
+    u32le(1),                                 // 1 extension
+    borshString('floors-dev.testnet'),        // the relayer account
+  );
+
   return concat(
     u8(0x01),              // signature_enabled: true
     u32le(0),              // subwallet_id: 0
     compressedPublicKey,   // [u8; 33] (no length prefix — fixed array in Borsh)
     nonces,
-    u32le(0),              // extensions BTreeSet: empty
+    extensions,            // extensions BTreeSet: floors-dev.testnet
   );
 }

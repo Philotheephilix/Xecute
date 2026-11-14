@@ -162,7 +162,7 @@ export default function Portfolio() {
           </button>
           <button
             onClick={() => window.open('https://chromewebstore.google.com/', '_blank')}
-            aria-label="Trade — install Floors extension"
+            aria-label="Trade — install Xecute extension"
             className="h-[88px] bg-white rounded-[18px] border-2 border-[#111] shadow-neo flex flex-col items-center justify-center gap-2 shadow-neo-active"
           >
             <svg className="w-6 h-6 stroke-current fill-none stroke-[2.2]" viewBox="0 0 24 24">

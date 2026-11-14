@@ -310,7 +310,7 @@ export default function Settings() {
         {/* App Info */}
         <div className="flex flex-col items-center gap-2 mt-2 mb-4">
           <div className="flex items-center gap-2">
-            <span className="text-xs font-semibold text-gray-400">Floors v0.1.0</span>
+            <span className="text-xs font-semibold text-gray-400">Xecute v0.1.0</span>
             <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-[#9662FF] text-white border border-[#111]">
               Testnet
             </span>

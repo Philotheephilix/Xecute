@@ -28,7 +28,7 @@ type FloorBps = 0 | 1000 | 2000;
 /** Duration is now a continuous value in seconds (slider-driven) */
 type FloorDuration = number;
 
-/** Slider range: 1 hour min, 2 days max (testnet) */
+/** Slider range: 1 day min, 2 days max (testnet) */
 const DURATION_MIN_SECS = 86400;      // 1 day (must match risk service minimum)
 const DURATION_MAX_SECS = 172800;     // 2 days
 const DURATION_DEFAULT_SECS = 86400;  // 1 day
@@ -159,11 +159,11 @@ interface InlinePasskeyResult {
  * Runs entirely in the extension popup (chrome-extension:// origin).
  */
 async function createPasskeyInline(name: string): Promise<InlinePasskeyResult> {
-  const displayName = name.trim() || 'Floors User';
+  const displayName = name.trim() || 'Xecute User';
   const credential = await navigator.credentials.create({
     publicKey: {
       rp: {
-        name: 'Floors',
+        name: 'Xecute',
         id: globalThis.location?.hostname ?? 'localhost',
       },
       user: {
@@ -363,10 +363,11 @@ function FloorRow({ floor, draftQuote, onChange }: FloorRowProps) {
         background: 'white',
         border: '2px solid #111111',
         borderRadius: '14px',
-        padding: '12px 14px',
+        padding: '10px 12px',
         display: 'flex',
         flexDirection: 'column',
-        gap: '10px',
+        gap: '8px',
+        boxShadow: '0px 3px 0px #111111',
       }}
       aria-label="Floor protection options"
     >
@@ -467,7 +468,7 @@ function FloorRow({ floor, draftQuote, onChange }: FloorRowProps) {
             `}</style>
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-            <span style={{ fontSize: '10px', fontWeight: 600, color: '#9ca3af' }}>1 hour</span>
+            <span style={{ fontSize: '10px', fontWeight: 600, color: '#9ca3af' }}>1 day</span>
             <span style={{ fontSize: '10px', fontWeight: 600, color: '#9ca3af' }}>2 days</span>
           </div>
         </div>
@@ -615,24 +616,25 @@ function BuyScreen({ state, onConfirm, onBack, onFloorChange, onAmountChange }: 
   return (
     <div
       className="screen screen-active"
-      style={{ padding: '0', display: 'flex', flexDirection: 'column' }}
+      style={{ padding: '0', display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}
     >
       {/* Sub-header: back + title */}
       <div
         style={{
           background: '#FAF9F6',
-          padding: '10px 18px',
+          padding: '8px 14px',
           display: 'flex',
           alignItems: 'center',
-          gap: '12px',
+          gap: '10px',
           borderBottom: '1px solid #e5e7eb',
+          flexShrink: 0,
         }}
       >
-        <button className="btn-back" onClick={onBack} aria-label="Back">
+        <button className="btn-back" onClick={onBack} aria-label="Back" style={{ width: '34px', height: '34px', borderRadius: '10px' }}>
           <BackArrow />
         </button>
         <div style={{ flex: 1 }}>
-          <div style={{ fontSize: '18px', fontWeight: 800, color: '#111111', lineHeight: 1.2 }}>
+          <div style={{ fontSize: '16px', fontWeight: 800, color: '#111111', lineHeight: 1.2 }}>
             Buy ${ticker}
           </div>
         </div>
@@ -641,25 +643,27 @@ function BuyScreen({ state, onConfirm, onBack, onFloorChange, onAmountChange }: 
             background: 'white',
             border: '2px solid #111111',
             borderRadius: '20px',
-            padding: '4px 12px',
-            fontSize: '13px',
+            padding: '3px 10px',
+            fontSize: '12px',
             fontWeight: 800,
-            boxShadow: '0px 2.5px 0px #111111',
+            boxShadow: '0px 2px 0px #111111',
           }}
         >
           ${ticker}
         </div>
       </div>
 
-      {/* Body */}
+      {/* Scrollable body */}
       <div
+        className="no-scrollbar"
         style={{
           flex: 1,
-          padding: '20px 18px',
+          padding: '12px 14px',
           display: 'flex',
           flexDirection: 'column',
-          gap: '14px',
+          gap: '8px',
           overflowY: 'auto',
+          minHeight: 0,
         }}
       >
         {/* ── Amount Input Card ───────────────────────────────── */}
@@ -667,16 +671,16 @@ function BuyScreen({ state, onConfirm, onBack, onFloorChange, onAmountChange }: 
           style={{
             background: 'white',
             border: '2px solid #111111',
-            borderRadius: '18px',
-            padding: '16px',
-            boxShadow: '0px 4px 0px #111111',
+            borderRadius: '14px',
+            padding: '12px',
+            boxShadow: '0px 3px 0px #111111',
             display: 'flex',
             flexDirection: 'column',
-            gap: '12px',
+            gap: '8px',
           }}
           aria-label="Amount input"
         >
-          <div style={{ fontSize: '12px', fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+          <div style={{ fontSize: '11px', fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
             Amount (USD)
           </div>
 
@@ -686,14 +690,14 @@ function BuyScreen({ state, onConfirm, onBack, onFloorChange, onAmountChange }: 
               display: 'flex',
               alignItems: 'center',
               border: '2px solid #111111',
-              borderRadius: '12px',
-              padding: '0 14px',
-              height: '48px',
-              boxShadow: '0px 2.5px 0px #111111',
+              borderRadius: '10px',
+              padding: '0 12px',
+              height: '40px',
+              boxShadow: '0px 2px 0px #111111',
               background: 'white',
             }}
           >
-            <span style={{ fontSize: '20px', fontWeight: 800, color: '#111111', marginRight: '4px' }}>$</span>
+            <span style={{ fontSize: '18px', fontWeight: 800, color: '#111111', marginRight: '4px' }}>$</span>
             <input
               ref={inputRef}
               type="number"
@@ -716,7 +720,7 @@ function BuyScreen({ state, onConfirm, onBack, onFloorChange, onAmountChange }: 
                 border: 'none',
                 outline: 'none',
                 background: 'transparent',
-                fontSize: '20px',
+                fontSize: '18px',
                 fontWeight: 800,
                 color: '#111111',
                 fontFamily: 'inherit',
@@ -728,7 +732,7 @@ function BuyScreen({ state, onConfirm, onBack, onFloorChange, onAmountChange }: 
           </div>
 
           {/* Quick-select pills */}
-          <div style={{ display: 'flex', gap: '8px' }}>
+          <div style={{ display: 'flex', gap: '6px' }}>
             {QUICK_AMOUNTS.map((preset) => {
               const isSelected = amount === preset;
               return (
@@ -739,9 +743,9 @@ function BuyScreen({ state, onConfirm, onBack, onFloorChange, onAmountChange }: 
                   style={{
                     flex: 1,
                     border: '2px solid #111111',
-                    borderRadius: '10px',
-                    padding: '6px 0',
-                    fontSize: '13px',
+                    borderRadius: '8px',
+                    padding: '5px 0',
+                    fontSize: '12px',
                     fontWeight: 800,
                     cursor: 'pointer',
                     fontFamily: 'inherit',
@@ -760,24 +764,24 @@ function BuyScreen({ state, onConfirm, onBack, onFloorChange, onAmountChange }: 
 
           {/* Live estimate */}
           {draftLoading && amount > 0 && (
-            <div style={{ fontSize: '13px', color: '#6b7280', fontWeight: 600 }}>
+            <div style={{ fontSize: '12px', color: '#6b7280', fontWeight: 600 }}>
               Fetching estimate…
             </div>
           )}
           {draftQuote !== null && !draftLoading && amount > 0 && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-              <span style={{ fontSize: '16px', fontWeight: 800, color: '#111111' }} data-testid="est-amount">
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1px' }}>
+              <span style={{ fontSize: '14px', fontWeight: 800, color: '#111111' }} data-testid="est-amount">
                 ≈ {draftQuote.display.est_amount} {ticker}
               </span>
               {perTokenPrice !== null && isFinite(perTokenPrice) && (
-                <span style={{ fontSize: '12px', fontWeight: 600, color: '#6b7280' }}>
+                <span style={{ fontSize: '11px', fontWeight: 600, color: '#6b7280' }}>
                   at ${perTokenPrice.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/{ticker}
                 </span>
               )}
             </div>
           )}
           {draftError !== null && !draftLoading && (
-            <div style={{ fontSize: '13px', color: '#EF7B28', fontWeight: 600 }}>
+            <div style={{ fontSize: '12px', color: '#EF7B28', fontWeight: 600 }}>
               {draftError}
             </div>
           )}
@@ -796,29 +800,29 @@ function BuyScreen({ state, onConfirm, onBack, onFloorChange, onAmountChange }: 
             style={{
               background: 'white',
               border: '2px solid #111111',
-              borderRadius: '18px',
-              padding: '16px',
-              boxShadow: '0px 4px 0px #111111',
+              borderRadius: '14px',
+              padding: '10px 12px',
+              boxShadow: '0px 3px 0px #111111',
               display: 'flex',
               flexDirection: 'column',
-              gap: '10px',
+              gap: '6px',
             }}
             aria-label="Order summary"
           >
-            <div style={{ fontSize: '12px', fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+            <div style={{ fontSize: '11px', fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
               Order Summary
             </div>
 
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontSize: '12.5px', fontWeight: 600, color: '#6b7280' }}>You pay</span>
-              <span style={{ fontSize: '15px', fontWeight: 800, color: '#111111' }} data-testid="you-pay">
+              <span style={{ fontSize: '12px', fontWeight: 600, color: '#6b7280' }}>You pay</span>
+              <span style={{ fontSize: '13px', fontWeight: 800, color: '#111111' }} data-testid="you-pay">
                 ${draftQuote.display.you_pay} USDC
               </span>
             </div>
 
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontSize: '12.5px', fontWeight: 600, color: '#6b7280' }}>You get</span>
-              <span style={{ fontSize: '15px', fontWeight: 800, color: '#111111' }}>
+              <span style={{ fontSize: '12px', fontWeight: 600, color: '#6b7280' }}>You get</span>
+              <span style={{ fontSize: '13px', fontWeight: 800, color: '#111111' }}>
                 ~{draftQuote.display.est_amount} {ticker}
               </span>
             </div>
@@ -826,10 +830,10 @@ function BuyScreen({ state, onConfirm, onBack, onFloorChange, onAmountChange }: 
             {/* Floor price — only when floor is active and quote has floor data */}
             {hasFloor && draftQuote.floor_price_e6 !== undefined && (
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontSize: '12.5px', fontWeight: 600, color: '#6b7280' }}>
+                <span style={{ fontSize: '12px', fontWeight: 600, color: '#6b7280' }}>
                   Floor ({floor.bps / 100}%)
                 </span>
-                <span style={{ fontSize: '14px', fontWeight: 800, color: '#29CEB4' }}>
+                <span style={{ fontSize: '13px', fontWeight: 800, color: '#29CEB4' }}>
                   {formatFloorPrice(draftQuote.floor_price_e6)}
                 </span>
               </div>
@@ -838,8 +842,8 @@ function BuyScreen({ state, onConfirm, onBack, onFloorChange, onAmountChange }: 
             {/* Fee — shown when available */}
             {draftQuote.fee_usdc !== undefined && (
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontSize: '12.5px', fontWeight: 600, color: '#6b7280' }}>Fee</span>
-                <span style={{ fontSize: '13px', fontWeight: 700, color: '#6b7280' }}>
+                <span style={{ fontSize: '12px', fontWeight: 600, color: '#6b7280' }}>Fee</span>
+                <span style={{ fontSize: '12px', fontWeight: 700, color: '#6b7280' }}>
                   {formatFee(draftQuote.fee_usdc)}
                 </span>
               </div>
@@ -848,8 +852,8 @@ function BuyScreen({ state, onConfirm, onBack, onFloorChange, onAmountChange }: 
             {/* Expiry — always shown when floor active */}
             {hasFloor && (
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontSize: '12.5px', fontWeight: 600, color: '#6b7280' }}>Expires</span>
-                <span style={{ fontSize: '12.5px', fontWeight: 700, color: '#111111' }}>
+                <span style={{ fontSize: '12px', fontWeight: 600, color: '#6b7280' }}>Expires</span>
+                <span style={{ fontSize: '12px', fontWeight: 700, color: '#111111' }}>
                   {formatDurationLabel(floor.duration_secs)}
                 </span>
               </div>
@@ -857,27 +861,41 @@ function BuyScreen({ state, onConfirm, onBack, onFloorChange, onAmountChange }: 
 
             {/* Quote ID */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontSize: '12px', fontWeight: 600, color: '#6b7280' }}>Quote ID</span>
-              <span style={{ fontSize: '11px', fontWeight: 700, color: '#6b7280', fontFamily: 'monospace' }}>
+              <span style={{ fontSize: '11px', fontWeight: 600, color: '#6b7280' }}>Quote ID</span>
+              <span style={{ fontSize: '10px', fontWeight: 700, color: '#6b7280', fontFamily: 'monospace' }}>
                 {draftQuote.quote_id.slice(0, 8)}…
               </span>
             </div>
           </div>
         )}
 
-        <div style={{ flex: 1 }} />
+        {/* Bottom spacer so content doesn't hide behind fixed button */}
+        <div style={{ height: '68px', flexShrink: 0 }} />
+      </div>
 
-        {/* Confirm button */}
+      {/* Fixed confirm button footer */}
+      <div
+        style={{
+          position: 'absolute',
+          bottom: 0,
+          left: 0,
+          right: 0,
+          padding: '10px 14px',
+          background: 'linear-gradient(to top, #FAF9F6 80%, transparent)',
+          zIndex: 20,
+          flexShrink: 0,
+        }}
+      >
         <button
           className="btn-neo"
           onClick={onConfirm}
           disabled={!canConfirm}
           style={{
             width: '100%',
-            height: '52px',
+            height: '46px',
             background: canConfirm ? '#EF7B28' : '#cccccc',
             color: '#111111',
-            fontSize: '15px',
+            fontSize: '14px',
             fontWeight: 800,
             display: 'flex',
             alignItems: 'center',
@@ -1155,7 +1173,7 @@ function PartialScreen({ ticker, draftQuote, floorError, actualQty, onAddFloor, 
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
             <span style={{ fontSize: '16px', color: '#29CEB4', fontWeight: 800 }}>✓</span>
             <span style={{ fontSize: '13px', fontWeight: 700, color: '#111111' }}>
-              Bought {actualQty ?? draftQuote?.display.est_amount ?? ''} {ticker}
+              Bought {actualQty ? (Number(actualQty) / 1e18).toFixed(6) : draftQuote?.display.est_amount ?? ''} {ticker}
             </span>
           </div>
 
@@ -1273,9 +1291,9 @@ function WelcomeScreen({ onCreateWallet, onSignIn }: WelcomeScreenProps) {
         textAlign: 'center',
       }}
     >
-      <img src="/icon-128.png" alt="Floors" width="64" height="64" style={{ borderRadius: '14px' }} />
+      <img src="/icon-128.png" alt="Xecute" width="64" height="64" style={{ borderRadius: '14px' }} />
       <div style={{ fontSize: '22px', fontWeight: 800, color: '#111111' }}>
-        Floors
+        Xecute
       </div>
       <div style={{ fontSize: '13px', fontWeight: 500, color: '#6b7280', lineHeight: '1.5' }}>
         Buy crypto with floor protection, directly from X posts.
@@ -1684,7 +1702,7 @@ function AccountReadyScreen({ accountId, onContinue }: AccountReadyScreenProps) 
           Account Created!
         </div>
         <div style={{ fontSize: '13px', fontWeight: 600, color: '#6b7280' }}>
-          Your Floors wallet is ready.
+          Your Xecute wallet is ready.
         </div>
       </div>
 
@@ -1847,7 +1865,7 @@ function LinkDeviceScreen({ accountId, originalCredentialId, onCreated }: LinkDe
           Link This Device
         </div>
         <div style={{ fontSize: '13px', fontWeight: 500, color: '#6b7280', lineHeight: '1.5' }}>
-          Your Floors account exists but needs a passkey on this device to trade.
+          Your Xecute account exists but needs a passkey on this device to trade.
         </div>
       </div>
 
@@ -3249,7 +3267,7 @@ function HomeTab({ accountId, onSwitchTab, onBuy, onFund }: HomeTabProps) {
         {!loading && activePositions.length > 0 && (
           <div>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
-              <span style={{ fontSize: '14px', fontWeight: 800, color: '#111' }}>Your Floors</span>
+              <span style={{ fontSize: '14px', fontWeight: 800, color: '#111' }}>Your Positions</span>
               <button
                 onClick={() => onSwitchTab('portfolio')}
                 style={{ background: 'none', border: 'none', fontSize: '11px', fontWeight: 800, color: '#EF7B28', cursor: 'pointer', fontFamily: 'inherit' }}
@@ -4268,7 +4286,7 @@ function SettingsTab({ accountId, passkeys, onPasskeysChanged, onSignOut }: Sett
         </div>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <span style={{ fontSize: '12px', fontWeight: 600, color: '#6b7280' }}>Built with</span>
-          <span style={{ fontSize: '12px', fontWeight: 800, color: '#EF7B28' }}>Floors</span>
+          <span style={{ fontSize: '12px', fontWeight: 800, color: '#EF7B28' }}>Xecute</span>
         </div>
       </div>
 
@@ -4355,7 +4373,7 @@ function MainTabInterface({ activeTab, onTabChange, accountId, passkeys, onPassk
 
 /** Parse floor defaults from a raw JSON string, returning a safe FloorSelection. */
 function parseFloorDefaults(raw: string | undefined): FloorSelection {
-  if (raw == null) return { bps: 0, duration_secs: DURATION_DEFAULT_SECS };
+  if (raw == null) return { bps: 1000 as FloorBps, duration_secs: DURATION_DEFAULT_SECS }; // Default: 10% floor ON
   try {
     const parsed = JSON.parse(raw) as { bps?: unknown; duration_secs?: unknown };
     const bps = typeof parsed.bps === 'number' ? parsed.bps : 0;
@@ -5224,7 +5242,7 @@ function App() {
       {state.screen === 'buy' && (
         <div style={{ display: 'flex', flexDirection: 'column', height: '100%', position: 'absolute', inset: 0 }}>
           <TopHeaderBar accountId={state.accountId} passkeys={state.passkeys} />
-          <div style={{ flex: 1, overflow: 'hidden' }}>
+          <div style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
             <BuyScreen
               state={state}
               onConfirm={handleConfirm}

@@ -60,7 +60,7 @@ export default function InviteCode({ navigate, setAccount, account, className }:
           Enter Your Invite Code
         </h1>
         <p className="text-base font-semibold text-gray-600 leading-relaxed mb-10">
-          Floors is in private beta. Enter your 8-character invite code to get started.
+          Xecute is in private beta. Enter your 8-character invite code to get started.
         </p>
 
         {/* Invite code badge */}

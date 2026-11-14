@@ -38,10 +38,10 @@ function hexToBytes(hex: string): Uint8Array {
 }
 
 /**
- * Fetch the USDC balance for an account via NEAR RPC ft_balance_of.
- * Returns a human-readable string (e.g. "20.00") or null on failure.
+ * Fetch the raw USDC balance (micro-units) for an account via NEAR RPC ft_balance_of.
+ * Returns the raw string from the contract (e.g. "44845177") or null on failure.
  */
-async function fetchUsdcBalance(accountId: string, rpcUrl: string, usdcContract: string): Promise<string | null> {
+async function fetchRawUsdcBalance(accountId: string, rpcUrl: string, usdcContract: string): Promise<string | null> {
   try {
     const args = Buffer.from(JSON.stringify({ account_id: accountId })).toString('base64');
     const response = await fetch(rpcUrl, {
@@ -62,11 +62,21 @@ async function fetchUsdcBalance(accountId: string, rpcUrl: string, usdcContract:
     });
     const data = await response.json() as { result?: { result?: number[] }; error?: unknown };
     if (!data.result?.result) return null;
-    const rawBalance = JSON.parse(Buffer.from(data.result.result).toString());
-    return (Number(rawBalance) / 1_000_000).toFixed(2);
+    const rawBalance = JSON.parse(Buffer.from(data.result.result).toString()) as string;
+    return rawBalance;
   } catch {
     return null;
   }
+}
+
+/**
+ * Fetch the USDC balance for an account via NEAR RPC ft_balance_of.
+ * Returns a human-readable string (e.g. "20.00") or null on failure.
+ */
+async function fetchUsdcBalance(accountId: string, rpcUrl: string, usdcContract: string): Promise<string | null> {
+  const raw = await fetchRawUsdcBalance(accountId, rpcUrl, usdcContract);
+  if (raw === null) return null;
+  return (Number(raw) / 1_000_000).toFixed(2);
 }
 
 /**
@@ -475,7 +485,7 @@ export function registerAccountRoutes(app: FastifyInstance, db: postgres.Sql, re
         created_at: Date;
       }
 
-      const [positionRows, tradeRows, onChainFloors, usdcBalance] = await Promise.all([
+      const [positionRows, tradeRows, onChainFloors, rawUsdcBalance, totalSpentRows] = await Promise.all([
         db<PositionRow[]>`
           SELECT floor_id, account_id, asset, qty, floor_price_e6, status, opened_at, expires_at
           FROM api.positions
@@ -492,8 +502,26 @@ export function registerAccountRoutes(app: FastifyInstance, db: postgres.Sql, re
           LIMIT 50
         `,
         fetchOnChainFloors(account_id, nearNodeUrl, floorsContract),
-        fetchUsdcBalance(account_id, nearNodeUrl, usdcContract),
+        fetchRawUsdcBalance(account_id, nearNodeUrl, usdcContract),
+        // Sum USDC spent in successful buys (debited from user's effective balance).
+        // On testnet protocol < 89, on-chain w_execute_extension doesn't work,
+        // so the on-chain balance stays unchanged. We debit via this ledger instead.
+        db<Array<{ total_spent: string | null }>>`
+          SELECT COALESCE(SUM(amount_usdc::bigint), 0)::text AS total_spent
+          FROM api.buy_submissions
+          WHERE account_id = ${account_id}
+            AND status NOT IN ('failed', 'rejected')
+        `,
       ]);
+
+      // Show on-chain USDC balance directly. On testnet the relayer fronts swap
+      // costs, so the user's on-chain balance reflects: initial funding + sell_to_floor
+      // credits - any actual transfers out. On mainnet with protocol v89+, the wallet
+      // extension handles actual USDC transfers from the user.
+      let usdcBalance: string | null = null;
+      if (rawUsdcBalance !== null) {
+        usdcBalance = (Number(rawUsdcBalance) / 1_000_000).toFixed(2);
+      }
 
       const hasMore = positionRows.length > limit;
       const dbPositions = hasMore ? positionRows.slice(0, limit) : positionRows;
@@ -841,7 +869,7 @@ export function registerAccountRoutes(app: FastifyInstance, db: postgres.Sql, re
       const { account_id } = paramResult.data;
 
       // Fetch buy submissions, account info, USDC balance, and on-chain floors in parallel
-      const [buyRows, accountRows, usdcBalance, onChainFloors] = await Promise.all([
+      const [buyRows, accountRows, rawUsdcBalancePortfolio, onChainFloors] = await Promise.all([
         db<PortfolioHistoryBuyRow[]>`
           SELECT amount_usdc, ticker, floor_id, created_at
           FROM api.buy_submissions
@@ -851,7 +879,7 @@ export function registerAccountRoutes(app: FastifyInstance, db: postgres.Sql, re
         db<Array<{ created_at: Date }>>`
           SELECT created_at FROM api.accounts WHERE account_id = ${account_id}
         `,
-        fetchUsdcBalance(account_id, nearNodeUrl, usdcContract),
+        fetchRawUsdcBalance(account_id, nearNodeUrl, usdcContract),
         fetchOnChainFloors(account_id, nearNodeUrl, floorsContract),
       ]);
 
@@ -859,7 +887,12 @@ export function registerAccountRoutes(app: FastifyInstance, db: postgres.Sql, re
         throw new FloorApiError('ACCOUNT_NOT_FOUND', `Account ${account_id} not found`, false, 404);
       }
 
-      const currentUsdcBalance = usdcBalance !== null ? parseFloat(usdcBalance) : 0;
+      // Effective USDC balance = on-chain balance - total spent in buys.
+      // (Same logic as portfolio endpoint — see note about protocol < 89.)
+      let currentUsdcBalance = 0;
+      if (rawUsdcBalancePortfolio !== null) {
+        currentUsdcBalance = Number(rawUsdcBalancePortfolio) / 1_000_000;
+      }
       const accountCreatedAt = accountRows[0].created_at;
 
       // Determine which tickers we need prices for (from active on-chain positions)

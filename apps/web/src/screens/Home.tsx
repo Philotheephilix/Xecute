@@ -69,7 +69,7 @@ export default function Home() {
 
         {/* Header */}
         <div className="flex items-center justify-between pt-4">
-          <span className="text-xl font-extrabold text-[#111] tracking-tight">Floors</span>
+          <span className="text-xl font-extrabold text-[#111] tracking-tight">Xecute</span>
           <button
             onClick={() => switchTab('settings')}
             className="w-10 h-10 bg-[#EF7B28] border-2 border-[#111] rounded-full shadow-neo-sm shadow-neo-active flex items-center justify-center"
@@ -115,7 +115,7 @@ export default function Home() {
           </button>
           <button
             onClick={() => window.open('https://chromewebstore.google.com/', '_blank')}
-            aria-label="Trade — install Floors extension"
+            aria-label="Trade — install Xecute extension"
             className="h-[88px] bg-white rounded-[18px] border-2 border-[#111] shadow-neo flex flex-col items-center justify-center gap-2 shadow-neo-active"
           >
             <svg className="w-6 h-6 stroke-current fill-none stroke-[2.2]" viewBox="0 0 24 24">
@@ -130,7 +130,7 @@ export default function Home() {
         {isLoadingPositions ? null : activePositions.length > 0 ? (
           <div className="flex flex-col gap-2">
             <div className="flex items-center justify-between">
-              <span className="text-base font-extrabold text-[#111]">Your Floors</span>
+              <span className="text-base font-extrabold text-[#111]">Your Positions</span>
               <button
                 onClick={() => switchTab('portfolio')}
                 className="text-xs font-extrabold text-[#EF7B28]"

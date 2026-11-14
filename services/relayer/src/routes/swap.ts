@@ -41,7 +41,7 @@ const MAINNET_ASSET_IDS: Record<string, string> = {
 // ---------------------------------------------------------------------------
 
 const REF_POOL_IDS: Record<string, number> = {
-  ETH: 365, // usdc.fakes.testnet / eth.fakes.testnet
+  ETH: 2980, // usdc.fakes.testnet / eth.fakes.testnet
   SOL: -1,  // SOL pool not yet deployed on testnet Ref Finance
 };
 
@@ -854,6 +854,74 @@ export function registerSwapRoutes(
       // Lazy-import createSigningAccount to avoid circular dep
       const { createSigningAccount } = await import('./relay.js');
       const signingAccount = await createSigningAccount(config);
+
+      // --- Transfer USDC from user wallet to relayer via w_execute_extension ---
+      // The relayer (floors-dev.testnet) is a registered extension on user wallets,
+      // so it can call w_execute_extension to move tokens from the user's account.
+      // NOTE: Global contract mutable calls require NEAR protocol >= 89.
+      // On testnet v88, this fails with "unreachable" trap. When it fails, we
+      // fall back to recording the debit in the database (the on-chain transfer
+      // will start working automatically when the protocol upgrades).
+      let usdcTransferredOnChain = false;
+      try {
+        const ftTransferArgs = JSON.stringify({
+          receiver_id: config.NEAR_ACCOUNT_ID,
+          amount: amount_usdc,
+          memo: 'Xecute swap',
+        });
+        const ftTransferArgsBase64 = Buffer.from(ftTransferArgs).toString('base64');
+
+        const extensionResult = await signingAccount.functionCall({
+          contractId: account_id,
+          methodName: 'w_execute_extension',
+          args: {
+            request: {
+              external: [{
+                receiver_id: config.USDC_TOKEN,
+                actions: [{
+                  action: 'function_call',
+                  payload: {
+                    function_name: 'ft_transfer',
+                    args: ftTransferArgsBase64,
+                    deposit: '1',              // 1 yoctoNEAR for ft_transfer
+                    gas: '10000000000000',      // 10 TGas
+                  },
+                }],
+              }],
+            },
+          },
+          gas: BigInt('50000000000000'),    // 50 TGas
+          attachedDeposit: BigInt('1'),     // 1 yoctoNEAR (w_execute_extension requires non-zero)
+        });
+
+        const transferTxHash = typeof extensionResult.transaction?.hash === 'string'
+          ? extensionResult.transaction.hash
+          : typeof extensionResult.transaction_outcome?.id === 'string'
+            ? extensionResult.transaction_outcome.id
+            : 'unknown';
+
+        usdcTransferredOnChain = true;
+        logger.info(
+          { account_id, amount_usdc, tx_hash: transferTxHash, event: 'usdc_transfer_from_user' },
+          'Transferred USDC from user wallet to relayer via w_execute_extension',
+        );
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        // Global contract mutable calls fail on protocol < 89 (unreachable trap).
+        // Record the debit in the database instead.
+        logger.warn(
+          { err: msg, account_id, amount_usdc, event: 'usdc_transfer_fallback' },
+          'On-chain USDC transfer failed (protocol < 89), recording debit in database',
+        );
+      }
+
+      // Always record the USDC debit in the database — this is the source of truth
+      // for the user's effective balance until on-chain transfers work at protocol >= 89.
+      await db`
+        INSERT INTO relayer.usdc_debits (account_id, amount, reason, idempotency_key)
+        VALUES (${account_id}, ${amount_usdc}, 'swap', ${idempotency_key})
+        ON CONFLICT (idempotency_key) DO NOTHING
+      `;
 
       let txHash: string;
       let amountOut: string;

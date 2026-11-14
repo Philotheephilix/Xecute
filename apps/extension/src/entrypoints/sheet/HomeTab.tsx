@@ -721,7 +721,7 @@ export default function HomeTab({ accountId, onSwitchTab, onBuy, onFund }: HomeT
         {!loading && activePositions.length > 0 && (
           <div>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
-              <span style={{ fontSize: '14px', fontWeight: 800, color: '#111' }}>Your Floors</span>
+              <span style={{ fontSize: '14px', fontWeight: 800, color: '#111' }}>Your Positions</span>
               <button
                 onClick={() => onSwitchTab('portfolio')}
                 style={{ background: 'none', border: 'none', fontSize: '11px', fontWeight: 800, color: '#EF7B28', cursor: 'pointer', fontFamily: 'inherit' }}
